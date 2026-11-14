@@ -22,6 +22,8 @@ javafx {
 
 dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
+    implementation("uk.co.caprica:vlcj:4.8.3")
+    implementation("uk.co.caprica:vlcj-javafx:1.2.1")
     testImplementation("junit:junit:4.13.2")
 }
 

@@ -88,6 +88,18 @@ public class RemoteFile {
         return m.contains("webm") || n.endsWith(".webm");
     }
 
+    public boolean isMkv() {
+        String m = getMimeType().toLowerCase();
+        String n = getName().toLowerCase();
+        return m.contains("matroska") || m.contains("mkv") || n.endsWith(".mkv");
+    }
+
+    public boolean isAvi() {
+        String m = getMimeType().toLowerCase();
+        String n = getName().toLowerCase();
+        return m.contains("avi") || m.contains("msvideo") || n.endsWith(".avi");
+    }
+
     @Override
     public String toString() {
         return getName() + " (" + getFormattedSize() + ")";

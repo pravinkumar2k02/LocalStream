@@ -124,16 +124,14 @@ VibeCoding-PrototypeApp/
 ### Step 3: Stream & Seek Media
 1. Double-click any file in the list (or click **"▶ Play"**).
 2. A separate **Player Window** will open with built-in controls:
+   - **Native Multi-Format Playback**: Plays **MKV, AVI, MP4, WebM**, TS, and other common video/audio containers natively right inside the app window with hardware acceleration.
+   - **Audio Track Selection**: Dropdown menu (`🔊 Audio`) dynamically populates all audio streams (e.g. Tamil, Korean, English, Director's Commentary) and allows switching tracks on the fly.
+   - **Subtitle Track Selection**: Dropdown menu (`💬 Subtitles`) dynamically lists embedded subtitles (ESub, SRT, ASS/SSA) and allows toggling or switching subtitle languages instantly.
+   - **10-Second Skip with Arrow Keys**:
+     - **Right Arrow (`→`)** / `+10s` button: Skips forward 10 seconds with on-screen visual confirmation (`+10s ⏩`).
+     - **Left Arrow (`←`)** / `-10s` button: Skips backward 10 seconds with on-screen visual confirmation (`⏪ -10s`).
    - **Play / Pause**: Button or `Spacebar`.
-   - **Range Seeking**: Drag or click anywhere on the timeline slider. Because the Android server supports HTTP Range requests (`HTTP 206 Partial Content`), seeking jumps directly to the requested frame without downloading the preceding data!
-   - **Skip**: Quick `-10s` and `+10s` buttons (or `Left`/`Right` arrow keys).
-   - **Volume**: Slider, mute button, or `Up`/`Down` arrow keys.
-   - **Speed**: `0.5x` to `2.0x`.
-   - **Fullscreen**: Toggle with `F11` or the fullscreen button.
-3. **Format Handling & Fallback**:
-   - **MP4 / H.264**: Plays natively with hardware acceleration.
-   - **WebM / VP8 / VP9 / Unsupported**: If JavaFX cannot decode the codec directly, the player automatically displays a fallback panel with:
-     - **"🌐 Play in Browser (Chrome/Edge)"**: One-click launch in Chrome/Edge, which decodes WebM with full HTTP range seeking natively!
-     - **"🎬 Open in VLC Player"**: Launches external VLC Player.
-     - **"🌐 Try Embedded HTML5 View"**: Attempts in-app WebKit rendering.
-     - **"⬇ Download File"**: Saves a copy locally.
+   - **Volume Control**: Slider (0–100%), mute button (`M`), or `Up`/`Down` arrow keys.
+   - **Timeline Seeking**: Scrubbing or clicking anywhere on the timeline slider leverages HTTP Range requests (`HTTP 206 Partial Content`) on the Android server for instant seeking.
+   - **Speed Control**: `0.5x` to `2.0x`.
+   - **Fullscreen**: Toggle with `F11` or `F` key.
