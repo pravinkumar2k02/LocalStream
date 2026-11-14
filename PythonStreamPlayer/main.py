@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
 
         url_lbl = QLabel("Server URL:")
-        self.url_input = QLineEdit("http://192.168.43.1:8080")
+        self.url_input = QLineEdit("https://192.168.43.1:8443")
         self.url_input.setFixedWidth(200)
 
         pin_lbl = QLabel("Key / PIN:")

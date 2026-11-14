@@ -31,10 +31,13 @@ class StreamApiClient:
     @staticmethod
     def normalize_url(server_url: str) -> str:
         if not server_url or not server_url.strip():
-            return "http://192.168.43.1:8080"
+            return "https://192.168.43.1:8443"
         url = server_url.strip()
         if not url.startswith("http://") and not url.startswith("https://"):
-            url = "http://" + url
+            if ":8443" in url:
+                url = "https://" + url
+            else:
+                url = "http://" + url
         return url.rstrip("/")
 
     @staticmethod

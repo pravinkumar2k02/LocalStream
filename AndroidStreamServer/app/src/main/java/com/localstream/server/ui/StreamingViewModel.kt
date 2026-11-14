@@ -28,10 +28,10 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
     private val _currentPin = MutableStateFlow(generateRandomPin())
     val currentPin: StateFlow<String> = _currentPin.asStateFlow()
 
-    private val _port = MutableStateFlow(8080)
+    private val _port = MutableStateFlow(8443)
     val port: StateFlow<Int> = _port.asStateFlow()
 
-    private val _useHttps = MutableStateFlow(false)
+    private val _useHttps = MutableStateFlow(true)
     val useHttps: StateFlow<Boolean> = _useHttps.asStateFlow()
 
     private val _rateLimit = MutableStateFlow(30) // requests per second
@@ -71,10 +71,22 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setUseHttps(enabled: Boolean) {
         _useHttps.value = enabled
-        if (enabled && _port.value == 8080) {
-            _port.value = 8443
-        } else if (!enabled && _port.value == 8443) {
-            _port.value = 8080
+        _port.value = if (enabled) 8443 else 8080
+        if (isRunning.value) {
+            val context = getApplication<Application>()
+            val intent = Intent(context, StreamingService::class.java).apply {
+                action = StreamingService.ACTION_RESTART
+                putExtra(StreamingService.EXTRA_PORT, _port.value)
+                putExtra(StreamingService.EXTRA_PIN, _currentPin.value)
+                putExtra(StreamingService.EXTRA_USE_HTTPS, _useHttps.value)
+                putExtra(StreamingService.EXTRA_RATE_LIMIT, _rateLimit.value)
+                putExtra(StreamingService.EXTRA_MAX_FAILED, _maxFailedAttempts.value)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 

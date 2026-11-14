@@ -24,6 +24,7 @@ class StreamingService : Service() {
         private const val NOTIFICATION_ID = 1001
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
+        const val ACTION_RESTART = "ACTION_RESTART"
         const val EXTRA_PORT = "EXTRA_PORT"
         const val EXTRA_PIN = "EXTRA_PIN"
         const val EXTRA_USE_HTTPS = "EXTRA_USE_HTTPS"
@@ -33,14 +34,14 @@ class StreamingService : Service() {
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
+        private val _isHttps = MutableStateFlow(true)
+        val isHttps: StateFlow<Boolean> = _isHttps.asStateFlow()
+
         private val _activePin = MutableStateFlow("8492")
         val activePin: StateFlow<String> = _activePin.asStateFlow()
 
-        private val _serverUrl = MutableStateFlow("http://192.168.43.1:8080")
+        private val _serverUrl = MutableStateFlow("https://192.168.43.1:8443")
         val serverUrl: StateFlow<String> = _serverUrl.asStateFlow()
-
-        private val _isHttps = MutableStateFlow(false)
-        val isHttps: StateFlow<Boolean> = _isHttps.asStateFlow()
 
         private val _scannedFiles = MutableStateFlow<List<MediaFile>>(emptyList())
         val scannedFiles: StateFlow<List<MediaFile>> = _scannedFiles.asStateFlow()
@@ -112,15 +113,35 @@ class StreamingService : Service() {
                 stopSelf()
             }
             ACTION_START -> {
-                val port = intent.getIntExtra(EXTRA_PORT, 8080)
+                val port = intent.getIntExtra(EXTRA_PORT, 8443)
                 val pin = intent.getStringExtra(EXTRA_PIN) ?: _activePin.value
-                val useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, false)
+                val useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, true)
                 val rateLimit = intent.getIntExtra(EXTRA_RATE_LIMIT, 30)
                 val maxFailed = intent.getIntExtra(EXTRA_MAX_FAILED, 5)
                 startServer(port, pin, useHttps, rateLimit, maxFailed)
             }
+            ACTION_RESTART -> {
+                val port = intent.getIntExtra(EXTRA_PORT, if (_isHttps.value) 8443 else 8080)
+                val pin = intent.getStringExtra(EXTRA_PIN) ?: _activePin.value
+                val useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, true)
+                val rateLimit = intent.getIntExtra(EXTRA_RATE_LIMIT, 30)
+                val maxFailed = intent.getIntExtra(EXTRA_MAX_FAILED, 5)
+                restartServer(port, pin, useHttps, rateLimit, maxFailed)
+            }
         }
         return START_NOT_STICKY
+    }
+
+    private fun restartServer(port: Int, pin: String, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {
+        val existingSessions = currentServerInstance?.authorizedSessions?.values?.toList() ?: emptyList()
+        server?.stop()
+        server = null
+        currentServerInstance = null
+        _isRunning.value = false
+        startServer(port, pin, useHttps, rateLimit, maxFailed)
+        for (session in existingSessions) {
+            server?.authorizeDevice(session.token, session.clientName)
+        }
     }
 
     private fun startServer(port: Int, pin: String, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {

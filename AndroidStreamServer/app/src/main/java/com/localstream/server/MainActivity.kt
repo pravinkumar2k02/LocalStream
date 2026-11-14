@@ -214,7 +214,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
                             Text("Detected Server Addresses:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            val scheme = if (isHttps) "https" else "http"
+                            val scheme = if (isRunning) (if (isHttps) "https" else "http") else (if (useHttps) "https" else "http")
                             if (networkAddresses.isEmpty()) {
                                 Text("$scheme://192.168.43.1:$port (Default Hotspot)", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                             } else {
@@ -351,13 +351,38 @@ fun MainScreen(viewModel: StreamingViewModel) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("End-to-End HTTPS / TLS 1.3", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                Text("Encrypt all traffic with RSA-2048 self-signed certificate", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("End-to-End HTTPS / TLS 1.3", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = if (useHttps) Color(0xFF00C853).copy(alpha = 0.15f) else Color.Gray.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (useHttps) "PORT 8443 (SECURE)" else "PORT 8080 (PLAIN)",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (useHttps) Color(0xFF00C853) else Color.Gray,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (isRunning) {
+                                        if (useHttps) "🔒 Active: Running with TLS 1.3 / RSA-2048 encryption (Port $port)"
+                                        else "⚠️ Active: Running unencrypted HTTP. Tap switch to switch to HTTPS immediately."
+                                    } else {
+                                        if (useHttps) "Enabled: Server will start in HTTPS mode (Port $port)"
+                                        else "Disabled: Server will start in Plain HTTP mode (Port $port)"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = if (useHttps) Color(0xFF00C853) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                             Switch(
                                 checked = useHttps,
                                 onCheckedChange = { viewModel.setUseHttps(it) },
-                                enabled = !isRunning
+                                enabled = true
                             )
                         }
 
