@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from api_client import StreamApiClient, PinAuthError, ServerConnError
 from player_window import PlayerWindow
+from wake_manager import ScreenWakeManager
 
 
 class FetchWorker(QThread):
@@ -47,6 +48,10 @@ class MainWindow(QMainWindow):
         self.all_files = []
         self.active_players = []
 
+        # Start ScreenWakeManager to keep laptop screen awake until application closes
+        self.wake_manager = ScreenWakeManager(interval_seconds=30)
+        self.wake_manager.start()
+
         self._build_ui()
 
     def _build_ui(self):
@@ -65,12 +70,12 @@ class MainWindow(QMainWindow):
 
         url_lbl = QLabel("Server URL:")
         self.url_input = QLineEdit("http://192.168.43.1:8080")
-        self.url_input.setFixedWidth(210)
+        self.url_input.setFixedWidth(200)
 
         pin_lbl = QLabel("PIN Token:")
         self.pin_input = QLineEdit()
         self.pin_input.setPlaceholderText("4-digit PIN")
-        self.pin_input.setFixedWidth(100)
+        self.pin_input.setFixedWidth(90)
         self.pin_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.show_pin_cb = QCheckBox("Show")
@@ -82,7 +87,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self._connect_server)
 
         self.status_lbl = QLabel("Disconnected")
-        self.status_lbl.setStyleSheet("color: #888888; font-size: 12px; margin-left: 8px;")
+        self.status_lbl.setStyleSheet("color: #888888; font-size: 12px; margin-left: 6px;")
 
         conn_bar.addWidget(title)
         conn_bar.addWidget(url_lbl)
@@ -94,7 +99,7 @@ class MainWindow(QMainWindow):
         conn_bar.addWidget(self.status_lbl)
         conn_bar.addStretch(1)
 
-        # Filter Bar
+        # Filter Bar + Anti-Sleep Status Badge
         filter_bar = QHBoxLayout()
         search_lbl = QLabel("🔍 Search:")
         self.search_input = QLineEdit()
@@ -104,9 +109,20 @@ class MainWindow(QMainWindow):
         self.count_lbl = QLabel("0 files")
         self.count_lbl.setStyleSheet("color: #888888; font-size: 12px;")
 
+        # Keep Screen Awake checkbox & status indicator
+        self.wake_cb = QCheckBox("Keep Screen Awake")
+        self.wake_cb.setChecked(True)
+        self.wake_cb.setToolTip(
+            "Simulates background user activity and uses Windows Power APIs to prevent "
+            "the screen from timing out, dimming, or sleeping while this app runs."
+        )
+        self.wake_cb.setStyleSheet("color: #00E676; font-size: 11px; font-weight: bold; margin-left: 12px;")
+        self.wake_cb.toggled.connect(self._toggle_screen_wake)
+
         filter_bar.addWidget(search_lbl)
         filter_bar.addWidget(self.search_input, stretch=1)
         filter_bar.addWidget(self.count_lbl)
+        filter_bar.addWidget(self.wake_cb)
 
         # File List Table
         self.table = QTableWidget()
@@ -122,7 +138,7 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
 
         # Bottom Hint Bar
-        hint = QLabel("💡 Tip: Turn on Android Hotspot, connect your laptop to it, enter Server IP & PIN, and click Connect.")
+        hint = QLabel("💡 Tip: Turn on Android Hotspot, connect your laptop to it, enter Server IP & PIN, and click Connect. Screen will stay awake until you close this app.")
         hint.setStyleSheet("color: #777777; font-size: 11px;")
 
         layout.addLayout(conn_bar)
@@ -133,6 +149,16 @@ class MainWindow(QMainWindow):
     def _toggle_pin_visibility(self, checked: bool):
         mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
         self.pin_input.setEchoMode(mode)
+
+    def _toggle_screen_wake(self, checked: bool):
+        if checked:
+            self.wake_manager.start()
+            self.wake_cb.setStyleSheet("color: #00E676; font-size: 11px; font-weight: bold; margin-left: 12px;")
+            self.wake_cb.setText("Keep Screen Awake")
+        else:
+            self.wake_manager.stop()
+            self.wake_cb.setStyleSheet("color: #888888; font-size: 11px; margin-left: 12px;")
+            self.wake_cb.setText("Keep Screen Awake (Off)")
 
     def _connect_server(self):
         url = self.url_input.text().strip()
@@ -222,6 +248,17 @@ class MainWindow(QMainWindow):
         player_win = PlayerWindow(file_data, stream_url)
         player_win.show()
         self.active_players.append(player_win)
+
+    def closeEvent(self, event):
+        # Cleanly stop the ScreenWakeManager and restore normal Windows power settings
+        if hasattr(self, 'wake_manager') and self.wake_manager:
+            self.wake_manager.stop()
+        for p in self.active_players:
+            try:
+                p.close()
+            except Exception:
+                pass
+        super().closeEvent(event)
 
 
 def main():

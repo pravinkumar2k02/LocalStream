@@ -6,27 +6,37 @@ A modern, high-performance local video streaming player built with Python and **
 
 ## 🌟 Key Features
 
-1. **Native MKV, AVI, MP4, and WebM Container & Codec Support**:
+1. **Keep Screen Awake (Anti-Sleep & Timeout Prevention)**:
+   - Prevents your laptop screen from turning off, dimming, locking, or sleeping due to Windows power settings or timeout policies.
+   - **Dual-Protection Engine**:
+     - **Windows Power API**: Engages `SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED)`.
+     - **Simulated Background Heartbeat**: Periodically emits harmless virtual input (`VK_F15` key and sub-pixel mouse nudge) in a background thread to reset corporate screensavers and OS idle timers.
+   - Stays active automatically from the moment you open the app until you close it.
+   - Includes an on-screen toggle (`Keep Screen Awake`) with real-time status.
+
+2. **Native MKV, AVI, MP4, and WebM Container & Codec Support**:
    - Uses Qt 6's native FFmpeg decoder pipeline.
    - Plays Matroska (`.mkv`), AVI (`.avi`), MP4 (`.mp4`), WebM (`.webm`), and QuickTime (`.mov`) files without requiring VLC or external software to be installed on the laptop.
-2. **Audio Track Selection**:
+
+3. **Audio Track Selection**:
    - Dynamic audio stream discovery.
    - Switch between multiple audio languages/dub tracks (e.g. Tamil, English, Hindi, Commentary) on the fly via the `🔊 Audio:` dropdown.
-3. **Embedded Subtitle Track Selection**:
+
+4. **Embedded Subtitle Track Selection**:
    - Embedded subtitle stream discovery (SRT, ASS, SubStation, VobSub).
    - Switch between subtitle languages or turn subtitles off via the `💬 Subtitles:` dropdown.
-4. **10-Second Skip with Arrow Keys & OSD**:
+
+5. **10-Second Skip with Arrow Keys & OSD**:
    - `Left Arrow` (←): Skip 10 seconds backward.
    - `Right Arrow` (→): Skip 10 seconds forward.
    - Visual OSD badge (`⏪ 10s` / `+10s ⏩`) appears centered over the video for immediate feedback.
    - Global event filter ensures arrow keys work reliably even if sliders or buttons have focus.
-5. **True Edge-to-Edge Fullscreen with Auto-Hiding Controls**:
-   - In Fullscreen mode (`F`, `F11`, double-click, or `⛶ Fullscreen` button), the video covers **100% of the display** (no window borders, no title bar, no Windows taskbar).
-   - Controls and top title bar float as a modern semi-transparent overlay over the video.
-   - **Auto-Hide on Idle**: After 2.5 seconds of mouse inactivity, all controls and the mouse cursor automatically hide completely, providing an uninterrupted cinematic experience.
-   - **Wake on Movement**: Moving the mouse even 1 pixel instantly reveals the controls and restores the cursor.
-   - Controls remain visible while scrubbing the timeline slider or hovering over buttons.
-6. **Built-in Controls**:
+
+6. **Dedicated Docked Controls in Small Screen & Edge-to-Edge Fullscreen**:
+   - **Small Screen (Windowed)**: Controls are cleanly docked beneath the video with their own dedicated layout space. Hardware video frames can never overlap or hide controls.
+   - **Fullscreen**: Video expands to **100% of the entire display**. Controls and cursor auto-hide after 2.5s of mouse idle, and wake up instantly when the mouse moves.
+
+7. **Built-in Controls**:
    - Play / Pause (Button or `Spacebar`).
    - Mute / Unmute (`M` key or `🔊` button).
    - Volume slider with percentage OSD badge (`Up` / `Down` arrow keys).

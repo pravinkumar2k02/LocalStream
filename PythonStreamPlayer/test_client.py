@@ -1,9 +1,11 @@
 import sys
+import time
 import unittest
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from api_client import StreamApiClient
 from player_window import PlayerWindow
+from wake_manager import ScreenWakeManager
 
 app = QApplication.instance()
 if app is None:
@@ -78,11 +80,26 @@ class TestPlayerWindow(unittest.TestCase):
         self.assertEqual(self.player_win.mute_btn.text(), "🔊")
 
 
+class TestScreenWakeManager(unittest.TestCase):
+    def test_wake_lifecycle(self):
+        mgr = ScreenWakeManager(interval_seconds=1)
+        self.assertFalse(mgr.is_running)
+        mgr.start()
+        self.assertTrue(mgr.is_running)
+        self.assertIsNotNone(mgr._thread)
+        self.assertTrue(mgr._thread.is_alive())
+
+        time.sleep(1.2)
+        mgr.stop()
+        self.assertFalse(mgr.is_running)
+
+
 if __name__ == "__main__":
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)
     suite = unittest.TestLoader().loadTestsFromNames([
         'test_client.TestStreamApiClient',
-        'test_client.TestPlayerWindow'
+        'test_client.TestPlayerWindow',
+        'test_client.TestScreenWakeManager'
     ])
     result = runner.run(suite)
     sys.exit(0 if result.wasSuccessful() else 1)

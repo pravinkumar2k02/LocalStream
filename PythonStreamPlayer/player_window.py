@@ -534,10 +534,15 @@ class PlayerWindow(QWidget):
         is_mine = (watched == self or (is_widget and self.isAncestorOf(watched)) or self.isActiveWindow())
 
         if is_mine:
-            # 1. Wake controls on mouse move in fullscreen
+            # 1. Wake controls on genuine mouse move in fullscreen
             if event.type() == QEvent.Type.MouseMove:
                 if self.isFullScreen():
-                    self._wake_controls()
+                    curr_pos = QCursor.pos()
+                    if hasattr(self, '_last_mouse_pos') and self._last_mouse_pos == curr_pos:
+                        pass
+                    else:
+                        self._last_mouse_pos = curr_pos
+                        self._wake_controls()
 
             # 2. Double click on video toggles fullscreen
             elif event.type() == QEvent.Type.MouseButtonDblClick:
@@ -548,7 +553,9 @@ class PlayerWindow(QWidget):
             # 3. Intercept media keys
             elif event.type() == QEvent.Type.KeyPress:
                 key = event.key()
-                if key == Qt.Key.Key_Left:
+                if key == Qt.Key.Key_F15:
+                    return True  # Absorb simulated wake heartbeat key
+                elif key == Qt.Key.Key_Left:
                     self.seek_relative(-10)
                     return True
                 elif key == Qt.Key.Key_Right:
