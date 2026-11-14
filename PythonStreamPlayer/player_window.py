@@ -1,25 +1,25 @@
 import sys
-import webbrowser
-from PyQt6.QtCore import Qt, QUrl, QTimer, QTime, QPoint, QEvent
+from PyQt6.QtCore import Qt, QUrl, QTimer, QEvent
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel,
-    QComboBox, QApplication
+    QComboBox, QSizePolicy, QApplication
 )
-from PyQt6.QtGui import QIcon, QKeySequence, QClipboard, QCursor
+from PyQt6.QtGui import QCursor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaMetaData
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 
 class PlayerWindow(QWidget):
     """
-    Dedicated High-Performance Video Player Window:
-    - Native MKV, AVI, MP4, and WebM hardware-accelerated playback via Qt 6.5+ FFmpeg backend.
-    - Multi-audio track selection (Tamil, Hindi, English, etc.).
-    - Embedded subtitle track selection (SRT, ASS, SubStation, etc.).
-    - 10-second skip via Left / Right arrow keys with centered OSD badge feedback.
+    High-Performance Media Player Window:
+    - Native MKV, AVI, MP4, and WebM hardware playback via Qt 6.5+ FFmpeg backend.
+    - Multi-audio track selection.
+    - Embedded subtitle track selection.
+    - 10-second skip via Left / Right arrow keys with centered OSD badge.
+    - Docked controls ALWAYS visible in small screen (windowed mode).
     - True edge-to-edge fullscreen where video covers 100% of the display.
-    - Automatic auto-hiding controls and mouse cursor on idle in fullscreen.
-    - Controls seamlessly reappear when the mouse moves.
+    - In fullscreen mode, controls and cursor auto-hide after 2.5s of idle,
+      and wake up instantly on mouse movement.
     """
 
     def __init__(self, file_data: dict, stream_url: str):
@@ -28,11 +28,11 @@ class PlayerWindow(QWidget):
         self.stream_url = stream_url
 
         self.setWindowTitle(f"Playing: {file_data.get('name', 'Media')} [{file_data.get('size_formatted', '')}]")
-        self.resize(1080, 680)
-        self.setMinimumSize(720, 480)
-        self.setStyleSheet("background-color: #000000; color: #FFFFFF;")
+        self.resize(980, 620)
+        self.setMinimumSize(680, 420)
+        self.setStyleSheet("background-color: #0E0E0E; color: #FFFFFF;")
 
-        # Enable mouse tracking on the main window
+        # Enable mouse tracking on window and widgets
         self.setMouseTracking(True)
 
         # Player Engine
@@ -41,13 +41,13 @@ class PlayerWindow(QWidget):
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.85)
 
-        # Video Widget (Layer 0: fills 100% of the window)
+        # Video Widget
         self.video_widget = QVideoWidget(self)
         self.video_widget.setMouseTracking(True)
         self.video_widget.setStyleSheet("background-color: #000000;")
         self.player.setVideoOutput(self.video_widget)
 
-        # Auto-hide timer for Fullscreen (2.5 seconds idle timeout)
+        # Auto-hide timer for Fullscreen only (2.5 seconds idle timeout)
         self.idle_timer = QTimer(self)
         self.idle_timer.setInterval(2500)
         self.idle_timer.timeout.connect(self._on_idle_timeout)
@@ -60,253 +60,261 @@ class PlayerWindow(QWidget):
 
         self.is_user_scrubbing = False
 
-        self._build_overlays()
+        self._build_ui()
         self._bind_events()
         self._load_stream()
 
         # Install application-level event filter so arrow keys and mouse moves are reliably caught
         QApplication.instance().installEventFilter(self)
 
-    def _build_overlays(self):
-        # 1. Top Bar Overlay
-        self.top_bar = QWidget(self)
-        self.top_bar.setStyleSheet("""
+    def _build_ui(self):
+        # Master Vertical Layout: Top Bar -> Video Widget -> Bottom Controls Bar
+        self.root_layout = QVBoxLayout(self)
+        self.root_layout.setContentsMargins(0, 0, 0, 0)
+        self.root_layout.setSpacing(0)
+
+        # 1. Top Header Bar
+        self.top_bar = self._create_top_bar()
+        self.top_bar.setMouseTracking(True)
+
+        # 2. Video Center Area with Centered Floating OSD Badge
+        self.osd_badge = QLabel(self.video_widget)
+        self.osd_badge.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 0.85); color: #FFFFFF; font-size: 20px; "
+            "font-weight: bold; padding: 10px 24px; border-radius: 8px; border: 2px solid #2979FF;"
+        )
+        self.osd_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.osd_badge.hide()
+
+        # 3. Bottom Controls Bar (Permanently docked & visible in windowed mode)
+        self.controls_bar = self._create_controls_bar()
+        self.controls_bar.setMouseTracking(True)
+
+        # Assemble layout
+        self.root_layout.addWidget(self.top_bar)
+        self.root_layout.addWidget(self.video_widget, stretch=1)
+        self.root_layout.addWidget(self.controls_bar)
+
+    def _create_top_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setStyleSheet("""
             QWidget {
-                background-color: rgba(14, 14, 14, 0.90);
-                border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+                background-color: #1A1A1A;
+                border-bottom: 1px solid #2A2A2A;
             }
         """)
-        top_layout = QHBoxLayout(self.top_bar)
-        top_layout.setContentsMargins(16, 8, 16, 8)
-        top_layout.setSpacing(12)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 6, 14, 6)
+        layout.setSpacing(10)
 
-        self.title_label = QLabel(self.file_data.get("name", "Unknown File"), self.top_bar)
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #FFFFFF; background: transparent;")
+        title = QLabel(self.file_data.get("name", "Unknown File"))
+        title.setStyleSheet("font-weight: bold; font-size: 13px; color: #FFFFFF;")
 
-        mime_badge = QLabel(self.file_data.get("mimeType", "video/*"), self.top_bar)
-        mime_badge.setStyleSheet(
-            "background-color: #2979FF; color: white; padding: 3px 8px; border-radius: 4px; "
+        mime = QLabel(self.file_data.get("mimeType", "video/*"))
+        mime.setStyleSheet(
+            "background-color: #2979FF; color: white; padding: 2px 8px; border-radius: 4px; "
             "font-size: 11px; font-weight: bold;"
         )
 
-        size_label = QLabel(self.file_data.get("size_formatted", ""), self.top_bar)
-        size_label.setStyleSheet("color: #AAAAAA; font-size: 12px; background: transparent;")
+        size = QLabel(self.file_data.get("size_formatted", ""))
+        size.setStyleSheet("color: #AAAAAA; font-size: 11px;")
 
-        copy_btn = QPushButton("📋 Copy Stream URL", self.top_bar)
+        copy_btn = QPushButton("📋 Copy Stream URL")
         copy_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         copy_btn.setStyleSheet(
-            "background-color: #262626; color: #DDDDDD; padding: 5px 12px; border-radius: 4px; "
+            "background-color: #262626; color: #DDDDDD; padding: 4px 10px; border-radius: 4px; "
             "font-size: 11px; border: 1px solid #3A3A3A;"
         )
         copy_btn.clicked.connect(self._copy_url)
 
-        top_layout.addWidget(self.title_label)
-        top_layout.addWidget(mime_badge)
-        top_layout.addWidget(size_label)
-        top_layout.addStretch(1)
-        top_layout.addWidget(copy_btn)
+        layout.addWidget(title)
+        layout.addWidget(mime)
+        layout.addWidget(size)
+        layout.addStretch(1)
+        layout.addWidget(copy_btn)
+        return bar
 
-        # 2. Bottom Controls Bar Overlay
-        self.controls_bar = QWidget(self)
-        self.controls_bar.setStyleSheet("""
+    def _create_controls_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setStyleSheet("""
             QWidget {
-                background-color: rgba(14, 14, 14, 0.92);
-                border-top: 1px solid rgba(255, 255, 255, 0.12);
+                background-color: #141414;
+                border-top: 1px solid #282828;
             }
             QLabel {
                 background: transparent;
             }
         """)
-        controls_layout = QVBoxLayout(self.controls_bar)
-        controls_layout.setContentsMargins(16, 8, 16, 12)
-        controls_layout.setSpacing(8)
+        vbox = QVBoxLayout(bar)
+        vbox.setContentsMargins(10, 6, 10, 8)
+        vbox.setSpacing(6)
 
-        # Row 1: Timeline Seek Slider + Time Label
+        # Row 1: Timeline Seek Slider + Time Label (takes full width)
         slider_row = QHBoxLayout()
-        slider_row.setSpacing(12)
+        slider_row.setSpacing(10)
 
-        self.time_slider = QSlider(Qt.Orientation.Horizontal, self.controls_bar)
+        self.time_slider = QSlider(Qt.Orientation.Horizontal)
         self.time_slider.setRange(0, 1000)
         self.time_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.time_slider.setStyleSheet("""
-            QSlider { background: transparent; height: 18px; }
-            QSlider::groove:horizontal { height: 6px; background: #333333; border-radius: 3px; }
-            QSlider::sub-page:horizontal { background: #2979FF; border-radius: 3px; }
+            QSlider { background: transparent; height: 16px; }
+            QSlider::groove:horizontal { height: 5px; background: #333333; border-radius: 2px; }
+            QSlider::sub-page:horizontal { background: #2979FF; border-radius: 2px; }
             QSlider::handle:horizontal {
                 background: #FFFFFF;
                 border: 2px solid #2979FF;
+                width: 12px;
+                height: 12px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #2979FF;
+                border: 2px solid #FFFFFF;
                 width: 14px;
                 height: 14px;
                 margin-top: -5px;
                 margin-bottom: -5px;
                 border-radius: 7px;
             }
-            QSlider::handle:horizontal:hover {
-                background: #2979FF;
-                border: 2px solid #FFFFFF;
-                width: 16px;
-                height: 16px;
-                margin-top: -6px;
-                margin-bottom: -6px;
-                border-radius: 8px;
-            }
         """)
         self.time_slider.sliderPressed.connect(self._on_slider_pressed)
         self.time_slider.sliderReleased.connect(self._on_slider_released)
 
-        self.time_label = QLabel("00:00:00 / 00:00:00", self.controls_bar)
-        self.time_label.setStyleSheet("color: #CCCCCC; font-family: monospace; font-size: 12px; min-width: 145px;")
+        self.time_label = QLabel("00:00:00 / 00:00:00")
+        self.time_label.setStyleSheet("color: #CCCCCC; font-family: monospace; font-size: 11px; min-width: 125px;")
         self.time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         slider_row.addWidget(self.time_slider, stretch=1)
         slider_row.addWidget(self.time_label)
 
         # Row 2: Play/Pause, 10s Skips, Audio track, Subtitles, Volume, Speed, Fullscreen
-        buttons_row = QHBoxLayout()
-        buttons_row.setSpacing(10)
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(6)
 
-        self.play_btn = QPushButton("▶ Play", self.controls_bar)
+        self.play_btn = QPushButton("▶ Play")
         self.play_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.play_btn.setStyleSheet(
-            "background-color: #2979FF; color: white; font-weight: bold; padding: 6px 16px; "
-            "border-radius: 4px; font-size: 12px;"
+            "background-color: #2979FF; color: white; font-weight: bold; padding: 4px 12px; "
+            "border-radius: 4px; font-size: 11px;"
         )
         self.play_btn.clicked.connect(self.toggle_play_pause)
 
-        self.back10_btn = QPushButton("⏪ -10s", self.controls_bar)
+        self.back10_btn = QPushButton("⏪ -10s")
         self.back10_btn.setToolTip("Skip 10 seconds backward (Left Arrow)")
         self.back10_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.back10_btn.setStyleSheet(
-            "background-color: #262626; color: #EEEEEE; padding: 6px 12px; border-radius: 4px; "
+            "background-color: #262626; color: #EEEEEE; padding: 4px 8px; border-radius: 4px; "
             "font-size: 11px; border: 1px solid #3A3A3A;"
         )
         self.back10_btn.clicked.connect(lambda: self.seek_relative(-10))
 
-        self.fwd10_btn = QPushButton("+10s ⏩", self.controls_bar)
+        self.fwd10_btn = QPushButton("+10s ⏩")
         self.fwd10_btn.setToolTip("Skip 10 seconds forward (Right Arrow)")
         self.fwd10_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fwd10_btn.setStyleSheet(
-            "background-color: #262626; color: #EEEEEE; padding: 6px 12px; border-radius: 4px; "
+            "background-color: #262626; color: #EEEEEE; padding: 4px 8px; border-radius: 4px; "
             "font-size: 11px; border: 1px solid #3A3A3A;"
         )
         self.fwd10_btn.clicked.connect(lambda: self.seek_relative(10))
 
         # Audio Track Dropdown
-        audio_label = QLabel("🔊 Audio:", self.controls_bar)
-        audio_label.setStyleSheet("color: #AAAAAA; font-size: 11px;")
-        self.audio_combo = QComboBox(self.controls_bar)
+        audio_label = QLabel("🔊")
+        audio_label.setStyleSheet("color: #AAAAAA; font-size: 12px;")
+        self.audio_combo = QComboBox()
         self.audio_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.audio_combo.setMinimumWidth(130)
+        self.audio_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.audio_combo.setMinimumWidth(80)
+        self.audio_combo.setMaximumWidth(125)
         self.audio_combo.setStyleSheet("""
-            QComboBox { background-color: #262626; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #3A3A3A; }
+            QComboBox { background-color: #262626; color: white; padding: 3px 6px; border-radius: 4px; font-size: 11px; border: 1px solid #3A3A3A; }
             QComboBox QAbstractItemView { background-color: #1E1E1E; color: white; selection-background-color: #2979FF; }
         """)
         self.audio_combo.currentIndexChanged.connect(self._on_audio_track_changed)
 
         # Subtitle Track Dropdown
-        sub_label = QLabel("💬 Subtitles:", self.controls_bar)
-        sub_label.setStyleSheet("color: #AAAAAA; font-size: 11px;")
-        self.subtitle_combo = QComboBox(self.controls_bar)
+        sub_label = QLabel("💬")
+        sub_label.setStyleSheet("color: #AAAAAA; font-size: 12px;")
+        self.subtitle_combo = QComboBox()
         self.subtitle_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.subtitle_combo.setMinimumWidth(130)
+        self.subtitle_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.subtitle_combo.setMinimumWidth(80)
+        self.subtitle_combo.setMaximumWidth(125)
         self.subtitle_combo.setStyleSheet("""
-            QComboBox { background-color: #262626; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #3A3A3A; }
+            QComboBox { background-color: #262626; color: white; padding: 3px 6px; border-radius: 4px; font-size: 11px; border: 1px solid #3A3A3A; }
             QComboBox QAbstractItemView { background-color: #1E1E1E; color: white; selection-background-color: #2979FF; }
         """)
         self.subtitle_combo.currentIndexChanged.connect(self._on_subtitle_track_changed)
 
         # Volume Controls
-        self.mute_btn = QPushButton("🔊", self.controls_bar)
+        self.mute_btn = QPushButton("🔊")
         self.mute_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.mute_btn.setStyleSheet("background: transparent; font-size: 14px; border: none;")
+        self.mute_btn.setFixedWidth(24)
+        self.mute_btn.setStyleSheet("background: transparent; font-size: 13px; border: none;")
         self.mute_btn.clicked.connect(self.toggle_mute)
 
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal, self.controls_bar)
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(85)
-        self.volume_slider.setFixedWidth(75)
+        self.volume_slider.setFixedWidth(55)
         self.volume_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.volume_slider.setStyleSheet("""
-            QSlider { background: transparent; height: 16px; }
+            QSlider { background: transparent; height: 14px; }
             QSlider::groove:horizontal { height: 4px; background: #333333; border-radius: 2px; }
             QSlider::sub-page:horizontal { background: #2979FF; border-radius: 2px; }
-            QSlider::handle:horizontal { background: white; width: 10px; margin-top: -3px; margin-bottom: -3px; border-radius: 5px; }
+            QSlider::handle:horizontal { background: white; width: 8px; margin-top: -3px; margin-bottom: -3px; border-radius: 4px; }
         """)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
 
         # Speed Dropdown
-        speed_label = QLabel("Speed:", self.controls_bar)
-        speed_label.setStyleSheet("color: #888888; font-size: 11px;")
-        self.speed_combo = QComboBox(self.controls_bar)
+        self.speed_combo = QComboBox()
         self.speed_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.speed_combo.setFixedWidth(52)
         self.speed_combo.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
         self.speed_combo.setCurrentText("1.0x")
         self.speed_combo.setStyleSheet("""
-            QComboBox { background-color: #262626; color: white; font-size: 11px; padding: 3px 6px; border-radius: 4px; border: 1px solid #3A3A3A; }
+            QComboBox { background-color: #262626; color: white; font-size: 11px; padding: 3px 4px; border-radius: 4px; border: 1px solid #3A3A3A; }
             QComboBox QAbstractItemView { background-color: #1E1E1E; color: white; selection-background-color: #2979FF; }
         """)
         self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
 
         # Fullscreen Toggle Button
-        self.fs_btn = QPushButton("⛶ Fullscreen", self.controls_bar)
+        self.fs_btn = QPushButton("⛶ Fullscreen")
         self.fs_btn.setToolTip("Toggle Fullscreen (F / F11 / Double-Click)")
         self.fs_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fs_btn.setStyleSheet(
-            "background-color: #262626; color: #EEEEEE; padding: 6px 14px; border-radius: 4px; "
+            "background-color: #262626; color: #EEEEEE; padding: 4px 10px; border-radius: 4px; "
             "font-size: 11px; font-weight: bold; border: 1px solid #3A3A3A;"
         )
         self.fs_btn.clicked.connect(self.toggle_fullscreen)
 
-        buttons_row.addWidget(self.play_btn)
-        buttons_row.addWidget(self.back10_btn)
-        buttons_row.addWidget(self.fwd10_btn)
-        buttons_row.addWidget(audio_label)
-        buttons_row.addWidget(self.audio_combo)
-        buttons_row.addWidget(sub_label)
-        buttons_row.addWidget(self.subtitle_combo)
-        buttons_row.addWidget(self.mute_btn)
-        buttons_row.addWidget(self.volume_slider)
-        buttons_row.addWidget(speed_label)
-        buttons_row.addWidget(self.speed_combo)
-        buttons_row.addStretch(1)
-        buttons_row.addWidget(self.fs_btn)
+        controls_row.addWidget(self.play_btn)
+        controls_row.addWidget(self.back10_btn)
+        controls_row.addWidget(self.fwd10_btn)
+        controls_row.addWidget(audio_label)
+        controls_row.addWidget(self.audio_combo)
+        controls_row.addWidget(sub_label)
+        controls_row.addWidget(self.subtitle_combo)
+        controls_row.addWidget(self.mute_btn)
+        controls_row.addWidget(self.volume_slider)
+        controls_row.addWidget(self.speed_combo)
+        controls_row.addStretch(1)
+        controls_row.addWidget(self.fs_btn)
 
-        controls_layout.addLayout(slider_row)
-        controls_layout.addLayout(buttons_row)
-
-        # 3. Center OSD Badge (Floating Notification)
-        self.osd_badge = QLabel(self)
-        self.osd_badge.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 0.85); color: #FFFFFF; font-size: 22px; "
-            "font-weight: bold; padding: 12px 28px; border-radius: 10px; border: 2px solid #2979FF;"
-        )
-        self.osd_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.osd_badge.hide()
+        vbox.addLayout(slider_row)
+        vbox.addLayout(controls_row)
+        return bar
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        w = self.width()
-        h = self.height()
-
-        # Video fills 100% of the entire window/screen
-        self.video_widget.setGeometry(0, 0, w, h)
-
-        # Top Bar
-        top_h = 50
-        self.top_bar.setGeometry(0, 0, w, top_h)
-        self.top_bar.raise_()
-
-        # Bottom Controls Bar
-        ctl_h = 96
-        self.controls_bar.setGeometry(0, h - ctl_h, w, ctl_h)
-        self.controls_bar.raise_()
-
-        # Center OSD Badge
-        if hasattr(self, 'osd_badge'):
+        # Keep OSD badge centered on the video widget
+        if hasattr(self, 'osd_badge') and hasattr(self, 'video_widget'):
+            w = self.video_widget.width()
+            h = self.video_widget.height()
             bw = self.osd_badge.width()
             bh = self.osd_badge.height()
             self.osd_badge.move((w - bw) // 2, (h - bh) // 2)
-            self.osd_badge.raise_()
 
     def _bind_events(self):
         self.player.positionChanged.connect(self._on_position_changed)
@@ -426,7 +434,7 @@ class PlayerWindow(QWidget):
         target = max(0, min(dur, cur + seconds * 1000))
         self.player.setPosition(target)
 
-        # Show Floating OSD Badge
+        # Show Floating OSD Badge centered on video
         msg = f"+{seconds}s ⏩" if seconds > 0 else f"⏪ {abs(seconds)}s"
         self._show_osd(msg)
 
@@ -438,13 +446,16 @@ class PlayerWindow(QWidget):
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
-            # Exit Fullscreen
+            # Exit Fullscreen -> Return to Docked Windowed Mode
             self.showNormal()
             self.fs_btn.setText("⛶ Fullscreen")
-            self._wake_controls()
+            self.top_bar.show()
+            self.controls_bar.show()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.video_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.idle_timer.stop()
         else:
-            # Enter Fullscreen: video covers 100% of the entire display
+            # Enter Fullscreen -> Video covers 100% of the entire display
             self.showFullScreen()
             self.fs_btn.setText("🗗 Exit Fullscreen")
             self._wake_controls()
@@ -454,7 +465,7 @@ class PlayerWindow(QWidget):
         if not self.isFullScreen():
             return
 
-        # Do not auto-hide while scrubbing the seek bar
+        # Do not auto-hide while scrubbing timeline
         if self.is_user_scrubbing:
             self.idle_timer.start(1000)
             return
@@ -465,7 +476,7 @@ class PlayerWindow(QWidget):
             self.idle_timer.start(1500)
             return
 
-        # Hide overlay controls completely: pure edge-to-edge video
+        # Hide bars in fullscreen: video expands to 100% of the entire monitor
         self.top_bar.hide()
         self.controls_bar.hide()
 
@@ -476,10 +487,8 @@ class PlayerWindow(QWidget):
     def _wake_controls(self):
         if not self.controls_bar.isVisible():
             self.controls_bar.show()
-            self.controls_bar.raise_()
         if not self.top_bar.isVisible():
             self.top_bar.show()
-            self.top_bar.raise_()
 
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.video_widget.setCursor(Qt.CursorShape.ArrowCursor)
@@ -490,8 +499,8 @@ class PlayerWindow(QWidget):
     def _show_osd(self, text: str):
         self.osd_badge.setText(text)
         self.osd_badge.adjustSize()
-        w = self.width()
-        h = self.height()
+        w = self.video_widget.width()
+        h = self.video_widget.height()
         bw = self.osd_badge.width()
         bh = self.osd_badge.height()
         self.osd_badge.move((w - bw) // 2, (h - bh) // 2)
@@ -521,14 +530,14 @@ class PlayerWindow(QWidget):
 
     # Global Event Filter to guarantee Arrow keys and Mouse Move handling
     def eventFilter(self, watched, event):
-        # Safely check if the event belongs to this player window or its child widgets
         is_widget = isinstance(watched, QWidget)
         is_mine = (watched == self or (is_widget and self.isAncestorOf(watched)) or self.isActiveWindow())
 
         if is_mine:
-            # 1. Wake controls on ANY mouse move
+            # 1. Wake controls on mouse move in fullscreen
             if event.type() == QEvent.Type.MouseMove:
-                self._wake_controls()
+                if self.isFullScreen():
+                    self._wake_controls()
 
             # 2. Double click on video toggles fullscreen
             elif event.type() == QEvent.Type.MouseButtonDblClick:
@@ -536,7 +545,7 @@ class PlayerWindow(QWidget):
                     self.toggle_fullscreen()
                     return True
 
-            # 3. Handle Arrow Keys, Space, and Shortcuts globally so focus doesn't swallow them
+            # 3. Intercept media keys
             elif event.type() == QEvent.Type.KeyPress:
                 key = event.key()
                 if key == Qt.Key.Key_Left:
