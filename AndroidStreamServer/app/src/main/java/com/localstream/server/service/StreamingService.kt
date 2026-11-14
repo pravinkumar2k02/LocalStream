@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.localstream.server.MainActivity
+import com.localstream.server.model.DeviceSession
 import com.localstream.server.model.MediaFile
 import com.localstream.server.server.StreamingHttpServer
 import com.localstream.server.util.NetworkUtils
@@ -25,6 +26,9 @@ class StreamingService : Service() {
         const val ACTION_STOP = "ACTION_STOP"
         const val EXTRA_PORT = "EXTRA_PORT"
         const val EXTRA_PIN = "EXTRA_PIN"
+        const val EXTRA_USE_HTTPS = "EXTRA_USE_HTTPS"
+        const val EXTRA_RATE_LIMIT = "EXTRA_RATE_LIMIT"
+        const val EXTRA_MAX_FAILED = "EXTRA_MAX_FAILED"
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
@@ -35,11 +39,17 @@ class StreamingService : Service() {
         private val _serverUrl = MutableStateFlow("http://192.168.43.1:8080")
         val serverUrl: StateFlow<String> = _serverUrl.asStateFlow()
 
+        private val _isHttps = MutableStateFlow(false)
+        val isHttps: StateFlow<Boolean> = _isHttps.asStateFlow()
+
         private val _scannedFiles = MutableStateFlow<List<MediaFile>>(emptyList())
         val scannedFiles: StateFlow<List<MediaFile>> = _scannedFiles.asStateFlow()
 
         private val _serverLogs = MutableStateFlow<List<String>>(emptyList())
         val serverLogs: StateFlow<List<String>> = _serverLogs.asStateFlow()
+
+        private val _authorizedDevices = MutableStateFlow<List<DeviceSession>>(emptyList())
+        val authorizedDevices: StateFlow<List<DeviceSession>> = _authorizedDevices.asStateFlow()
 
         var currentServerInstance: StreamingHttpServer? = null
 
@@ -53,9 +63,28 @@ class StreamingService : Service() {
             currentServerInstance?.pin = pin
         }
 
+        fun authorizeDevice(token: String, clientName: String): DeviceSession? {
+            val session = currentServerInstance?.authorizeDevice(token, clientName)
+            refreshDevicesList()
+            return session
+        }
+
+        fun revokeDevice(token: String) {
+            currentServerInstance?.revokeDevice(token)
+            refreshDevicesList()
+        }
+
+        fun updateRateLimitSettings(reqPerSec: Int, maxFailed: Int, banSec: Int) {
+            currentServerInstance?.updateRateLimitSettings(reqPerSec, maxFailed, banSec)
+        }
+
+        fun refreshDevicesList() {
+            _authorizedDevices.value = currentServerInstance?.authorizedSessions?.values?.toList() ?: emptyList()
+        }
+
         fun addLog(msg: String) {
             val current = _serverLogs.value.toMutableList()
-            if (current.size > 50) current.removeAt(0)
+            if (current.size > 60) current.removeAt(0)
             current.add(msg)
             _serverLogs.value = current
         }
@@ -85,28 +114,44 @@ class StreamingService : Service() {
             ACTION_START -> {
                 val port = intent.getIntExtra(EXTRA_PORT, 8080)
                 val pin = intent.getStringExtra(EXTRA_PIN) ?: _activePin.value
-                startServer(port, pin)
+                val useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, false)
+                val rateLimit = intent.getIntExtra(EXTRA_RATE_LIMIT, 30)
+                val maxFailed = intent.getIntExtra(EXTRA_MAX_FAILED, 5)
+                startServer(port, pin, useHttps, rateLimit, maxFailed)
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun startServer(port: Int, pin: String) {
+    private fun startServer(port: Int, pin: String, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {
         if (_isRunning.value) return
 
         _activePin.value = pin
+        _isHttps.value = useHttps
         val ip = NetworkUtils.getPrimaryIpAddress()
-        val url = "http://$ip:$port"
+        val scheme = if (useHttps) "https" else "http"
+        val url = "$scheme://$ip:$port"
         _serverUrl.value = url
 
-        server = StreamingHttpServer(applicationContext, port, pin).apply {
+        server = StreamingHttpServer(
+            context = applicationContext,
+            port = port,
+            pin = pin,
+            useHttps = useHttps,
+            maxRequestsPerSecond = rateLimit,
+            maxFailedAttempts = maxFailed
+        ).apply {
             onRequestLogged = { msg ->
                 addLog(msg)
+            }
+            onSessionUpdated = {
+                refreshDevicesList()
             }
             updateFiles(_scannedFiles.value)
             start()
         }
         currentServerInstance = server
+        refreshDevicesList()
         _isRunning.value = true
 
         val notification = buildNotification(url, pin)
@@ -121,6 +166,7 @@ class StreamingService : Service() {
         server?.stop()
         server = null
         currentServerInstance = null
+        _authorizedDevices.value = emptyList()
         _isRunning.value = false
     }
 
@@ -139,14 +185,14 @@ class StreamingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val protocol = if (_isHttps.value) "HTTPS (Encrypted)" else "HTTP"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Streaming Server Active")
-            .setContentText("$url • PIN: $pin")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setOngoing(true)
+            .setContentTitle("Local Stream Server ($protocol)")
+            .setContentText("URL: $url | PIN: $pin")
+            .setSmallIcon(android.R.drawable.ic_menu_upload)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
             .build()
     }
 
@@ -154,18 +200,13 @@ class StreamingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Local Streaming Service",
+                "Local Streaming Server Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows notifications when local media streaming server is active"
+                description = "Shows persistent status while streaming media over Wi-Fi"
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
         }
-    }
-
-    override fun onDestroy() {
-        stopServer()
-        super.onDestroy()
     }
 }

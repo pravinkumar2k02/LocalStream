@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +35,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import com.localstream.server.model.DeviceSession
 import com.localstream.server.model.MediaFile
 import com.localstream.server.ui.StreamingViewModel
 import com.localstream.server.ui.theme.LocalStreamServerTheme
@@ -65,13 +69,22 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(viewModel: StreamingViewModel) {
     val context = LocalContext.current
     val isRunning by viewModel.isRunning.collectAsState()
+    val isHttps by viewModel.isHttps.collectAsState()
+    val useHttps by viewModel.useHttps.collectAsState()
     val pin by viewModel.currentPin.collectAsState()
     val port by viewModel.port.collectAsState()
+    val rateLimit by viewModel.rateLimit.collectAsState()
+    val maxFailedAttempts by viewModel.maxFailedAttempts.collectAsState()
     val folderName by viewModel.selectedFolderName.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val files by viewModel.files.collectAsState()
     val networkAddresses by viewModel.networkAddresses.collectAsState()
     val serverLogs by viewModel.serverLogs.collectAsState()
+    val authorizedDevices by viewModel.authorizedDevices.collectAsState()
+
+    var showManualTokenDialog by remember { mutableStateOf(false) }
+    var manualTokenInput by remember { mutableStateOf("") }
+    var manualClientNameInput by remember { mutableStateOf("") }
 
     // Folder Picker Launcher
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -79,6 +92,14 @@ fun MainScreen(viewModel: StreamingViewModel) {
     ) { uri ->
         if (uri != null) {
             viewModel.onFolderSelected(uri)
+        }
+    }
+
+    // QR Code Camera Scanner Launcher
+    val qrScanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        if (result.contents != null) {
+            val (success, message) = viewModel.onQrCodeScanned(result.contents)
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -96,7 +117,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (isRunning) "ACTIVE" else "STOPPED",
+                                text = if (isRunning) (if (isHttps) "HTTPS ACTIVE" else "HTTP ACTIVE") else "STOPPED",
                                 color = if (isRunning) Color.Black else Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -119,7 +140,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
 
-            // 1. Hotspot & Network Guide Card
+            // 1. Connection Instructions Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -129,13 +150,13 @@ fun MainScreen(viewModel: StreamingViewModel) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("How to Connect from Laptop", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Fast Pairing & Connection Guide", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "1. Turn on Android Hotspot and connect your laptop to it (or join the same Wi-Fi).\n" +
-                            "2. Pick a folder with videos below and click 'Start Server'.\n" +
-                            "3. In the Laptop app, enter the Server IP and PIN shown below.",
+                            "1. Connect laptop to this phone's Hotspot (or same Wi-Fi).\n" +
+                            "2. Start Server below, then click '📷 Scan Laptop QR Code' to authorize your laptop in 1 second without typing.\n" +
+                            "3. Multiple laptops can be paired simultaneously without disconnecting existing ones.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -159,9 +180,13 @@ fun MainScreen(viewModel: StreamingViewModel) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("HTTP Server Status", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                 Text(
-                                    if (isRunning) "Broadcasting over port $port" else "Server is currently idle",
+                                    text = if (isRunning) (if (isHttps) "🔒 HTTPS Encrypted Server" else "⚡ HTTP Server Active") else "Server Idle",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    text = if (isRunning) "Listening on port $port" else "Configure settings and click Start",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -183,16 +208,18 @@ fun MainScreen(viewModel: StreamingViewModel) {
 
                         if (isRunning) {
                             Spacer(modifier = Modifier.height(12.dp))
-                            Divider()
+                            HorizontalDivider()
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Text("Detected Server Addresses:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                             Spacer(modifier = Modifier.height(6.dp))
 
+                            val scheme = if (isHttps) "https" else "http"
                             if (networkAddresses.isEmpty()) {
-                                Text("http://192.168.43.1:$port (Default Hotspot)", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                Text("$scheme://192.168.43.1:$port (Default Hotspot)", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                             } else {
                                 networkAddresses.forEach { addr ->
+                                    val fullUrl = "$scheme://${addr.ipAddress}:$port"
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -202,10 +229,10 @@ fun MainScreen(viewModel: StreamingViewModel) {
                                     ) {
                                         Column {
                                             Text(addr.displayName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("http://${addr.ipAddress}:$port", fontFamily = FontFamily.Monospace, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text(fullUrl, fontFamily = FontFamily.Monospace, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                         }
                                         IconButton(onClick = {
-                                            copyToClipboard(context, "http://${addr.ipAddress}:$port", "Server URL copied!")
+                                            copyToClipboard(context, fullUrl, "Server URL copied!")
                                         }) {
                                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL")
                                         }
@@ -217,7 +244,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
                 }
             }
 
-            // 3. Security PIN Token Card
+            // 3. QR Code Camera Authorization & Authorized Devices Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -231,53 +258,178 @@ fun MainScreen(viewModel: StreamingViewModel) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Security PIN Token", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Device Authorization (QR Pairing)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // QR Scan Action Buttons
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    val options = ScanOptions().apply {
+                                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                        setPrompt("Point camera at the QR code displayed on the laptop")
+                                        setCameraId(0)
+                                        setBeepEnabled(true)
+                                        setBarcodeImageEnabled(false)
+                                        setOrientationLocked(false)
+                                    }
+                                    qrScanLauncher.launch(options)
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Scan Laptop QR")
+                            }
+
+                            OutlinedButton(
+                                onClick = { showManualTokenDialog = true }
+                            ) {
+                                Text("Manual Token")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Active Authorized Devices List
+                        Text(
+                            text = "Authorized Live Devices (${authorizedDevices.size}):",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        if (authorizedDevices.isEmpty()) {
+                            Text(
+                                text = "No devices authorized yet. Click 'Scan Laptop QR' above to approve a laptop connection without breaking any other sessions.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            authorizedDevices.forEach { device ->
+                                DeviceSessionRow(device = device, onRevoke = { viewModel.revokeDevice(device.token) })
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Security PIN & Rate Limiting Settings Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Security & Rate Limiting Settings", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // HTTPS Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("End-to-End HTTPS / TLS 1.3", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text("Encrypt all traffic with RSA-2048 self-signed certificate", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = useHttps,
+                                onCheckedChange = { viewModel.setUseHttps(it) },
+                                enabled = !isRunning
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Rate Limit Setting
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Request Rate Limit", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text("Max requests per second per IP", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { viewModel.setRateLimit(rateLimit - 5) }) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                                }
+                                Text("$rateLimit req/s", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                IconButton(onClick = { viewModel.setRateLimit(rateLimit + 5) }) {
+                                    Icon(Icons.Default.Add, contentDescription = "Increase")
+                                }
+                            }
+                        }
+
+                        // Max Failed Auth Attempts
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Brute Force Ban Threshold", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text("Auto-ban IP for 60s after failed attempts", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { viewModel.setMaxFailedAttempts(maxFailedAttempts - 1) }) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                                }
+                                Text("$maxFailedAttempts attempts", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                IconButton(onClick = { viewModel.setMaxFailedAttempts(maxFailedAttempts + 1) }) {
+                                    Icon(Icons.Default.Add, contentDescription = "Increase")
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Legacy Fallback PIN
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Fallback 4-Digit PIN: $pin", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                                Text("Available as manual fallback if QR scan is unused", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             IconButton(onClick = { viewModel.regeneratePin() }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Regenerate PIN")
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = pin,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 6.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Button(
-                                onClick = { copyToClipboard(context, pin, "PIN copied to clipboard!") },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copy PIN")
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            "Required by laptop app to access GET /files and GET /stream/{id}.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
 
-            // 4. Folder Selector Card
+            // 5. Folder Selector Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -335,7 +487,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
                 }
             }
 
-            // 5. Scanned Files Header
+            // 6. Scanned Files Header
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -355,13 +507,13 @@ fun MainScreen(viewModel: StreamingViewModel) {
                 }
             }
 
-            // 6. Scanned Files Items
+            // 7. Scanned Files Items
             if (files.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 24.dp),
+                            .padding(vertical = 20.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -377,11 +529,11 @@ fun MainScreen(viewModel: StreamingViewModel) {
                 }
             }
 
-            // 7. Recent Server Activity Logs
+            // 8. Recent Server Activity Logs
             if (serverLogs.isNotEmpty()) {
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Recent Server Requests", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Recent Server Activity & Logs", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
                 item {
                     Card(
@@ -389,7 +541,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            serverLogs.takeLast(6).reversed().forEach { logLine ->
+                            serverLogs.takeLast(7).reversed().forEach { logLine ->
                                 Text(
                                     text = logLine,
                                     fontFamily = FontFamily.Monospace,
@@ -404,6 +556,87 @@ fun MainScreen(viewModel: StreamingViewModel) {
             }
 
             item { Spacer(modifier = Modifier.height(20.dp)) }
+        }
+    }
+
+    // Manual Token Input Dialog
+    if (showManualTokenDialog) {
+        AlertDialog(
+            onDismissRequest = { showManualTokenDialog = false },
+            title = { Text("Authorize Device Manually") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Paste the session token displayed on your laptop screen:", fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = manualTokenInput,
+                        onValueChange = { manualTokenInput = it },
+                        label = { Text("Session Token") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = manualClientNameInput,
+                        onValueChange = { manualClientNameInput = it },
+                        label = { Text("Device Name (e.g. My Laptop)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (manualTokenInput.isNotBlank()) {
+                        viewModel.authorizeManualToken(manualTokenInput, manualClientNameInput)
+                        Toast.makeText(context, "Device Authorized!", Toast.LENGTH_SHORT).show()
+                        showManualTokenDialog = false
+                        manualTokenInput = ""
+                        manualClientNameInput = ""
+                    }
+                }) {
+                    Text("Authorize")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showManualTokenDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun DeviceSessionRow(device: DeviceSession, onRevoke: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF00E676))
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(device.clientName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(
+                    text = "Token: ${device.token.take(12)}... ${if (device.ipAddress.isNotBlank()) "| IP: ${device.ipAddress}" else ""}",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        IconButton(onClick = onRevoke, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Revoke Device", tint = Color(0xFFD32F2F))
         }
     }
 }
@@ -438,7 +671,7 @@ fun MediaFileRow(file: MediaFile) {
                     when {
                         file.isVideo() -> Icons.Default.Movie
                         file.isAudio() -> Icons.Default.MusicNote
-                        else -> Icons.Default.InsertDriveFile
+                        else -> Icons.AutoMirrored.Filled.InsertDriveFile
                     },
                     contentDescription = null,
                     tint = Color.White,

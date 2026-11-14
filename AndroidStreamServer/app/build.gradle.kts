@@ -50,6 +50,8 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/DEPENDENCIES"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            excludes += "META-INF/INDEX.LIST"
         }
     }
 }
@@ -78,6 +80,14 @@ dependencies {
 
     // JSON serialization
     implementation("com.google.code.gson:gson:2.11.0")
+
+    // QR Code Scanning
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.5.3")
+
+    // BouncyCastle for X.509 self-signed TLS certificates
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
     testImplementation(libs.junit)
     debugImplementation(libs.compose.ui.tooling)

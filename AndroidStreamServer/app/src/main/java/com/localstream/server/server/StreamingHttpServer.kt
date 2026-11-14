@@ -4,9 +4,11 @@ import android.content.Context
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.google.gson.Gson
+import com.localstream.server.model.DeviceSession
 import com.localstream.server.model.MediaFile
 import kotlinx.coroutines.*
 import java.io.*
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
@@ -16,16 +18,21 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
- * High-performance, lightweight embedded HTTP server supporting:
- * - GET /files (JSON listing of available media files)
- * - GET /stream/{id} & HEAD /stream/{id} (HTTP Range partial content streaming for video seeking)
- * - Basic PIN authentication token protection
- * - CORS headers for cross-origin web/client requests
+ * High-performance, lightweight embedded HTTP/HTTPS server supporting:
+ * - End-to-End TLS / HTTPS encryption via RSA-2048 self-signed certificates
+ * - Multi-device cryptographic session token authorization (QR Code pairing)
+ * - Configurable sliding-window rate limiting & brute-force IP ban protection
+ * - HTTP Range (206 Partial Content) streaming for smooth seeking
+ * - CORS headers for cross-origin browser/client requests
  */
 class StreamingHttpServer(
     private val context: Context,
     val port: Int = 8080,
-    var pin: String = "8492"
+    var pin: String = "8492",
+    var useHttps: Boolean = false,
+    var maxRequestsPerSecond: Int = 30,
+    var maxFailedAttempts: Int = 5,
+    var banDurationSeconds: Int = 60
 ) {
     companion object {
         private const val TAG = "StreamingHttpServer"
@@ -33,6 +40,9 @@ class StreamingHttpServer(
     }
 
     private val filesMap = ConcurrentHashMap<String, MediaFile>()
+    val authorizedSessions = ConcurrentHashMap<String, DeviceSession>()
+    val rateLimiter = RateLimiter(maxRequestsPerSecond, maxFailedAttempts, banDurationSeconds)
+
     private val gson = Gson()
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
@@ -41,6 +51,7 @@ class StreamingHttpServer(
 
     // Request listener for UI log display
     var onRequestLogged: ((String) -> Unit)? = null
+    var onSessionUpdated: (() -> Unit)? = null
 
     fun updateFiles(files: List<MediaFile>) {
         filesMap.clear()
@@ -50,14 +61,47 @@ class StreamingHttpServer(
         log("Updated server file library with ${files.size} items.")
     }
 
+    fun authorizeDevice(token: String, clientName: String): DeviceSession {
+        val session = DeviceSession(token = token, clientName = clientName)
+        authorizedSessions[token] = session
+        log("Authorized device: '$clientName' (Token: ${token.take(8)}...)")
+        onSessionUpdated?.invoke()
+        return session
+    }
+
+    fun revokeDevice(token: String) {
+        val removed = authorizedSessions.remove(token)
+        if (removed != null) {
+            log("Revoked device session: '${removed.clientName}'")
+            onSessionUpdated?.invoke()
+        }
+    }
+
+    fun updateRateLimitSettings(reqPerSec: Int, maxFailed: Int, banSec: Int) {
+        this.maxRequestsPerSecond = reqPerSec
+        this.maxFailedAttempts = maxFailed
+        this.banDurationSeconds = banSec
+        rateLimiter.maxRequestsPerSecond = reqPerSec
+        rateLimiter.maxFailedAttempts = maxFailed
+        rateLimiter.banDurationSeconds = banSec
+        log("Rate limits updated: $reqPerSec req/s, max $maxFailed failed attempts, $banSec s ban.")
+    }
+
     fun start() {
         if (isRunning) return
         isRunning = true
 
         serverScope.launch {
             try {
-                serverSocket = ServerSocket(port)
-                log("Streaming server started on port $port. Ready for connections.")
+                if (useHttps) {
+                    val (sslContext, _) = CertificateHelper.generateSelfSignedSslContext()
+                    val sslFactory = sslContext.serverSocketFactory
+                    serverSocket = sslFactory.createServerSocket(port)
+                    log("Secure HTTPS streaming server started on port $port with TLS 1.3 / RSA-2048.")
+                } else {
+                    serverSocket = ServerSocket(port)
+                    log("HTTP streaming server started on port $port. Ready for connections.")
+                }
 
                 while (isRunning && serverSocket != null && !serverSocket!!.isClosed) {
                     try {
@@ -91,6 +135,8 @@ class StreamingHttpServer(
     }
 
     private fun handleClient(socket: Socket) {
+        val clientIp = (socket.remoteSocketAddress as? InetSocketAddress)?.address?.hostAddress ?: "unknown"
+
         try {
             socket.soTimeout = 15000 // 15s timeout
             val inputStream = BufferedInputStream(socket.getInputStream())
@@ -107,6 +153,25 @@ class StreamingHttpServer(
 
             val method = parts[0].uppercase()
             val rawPath = parts[1]
+
+            // 1. Rate Limiter & Brute-Force Check
+            when (val check = rateLimiter.checkRequest(clientIp)) {
+                is RateLimitResult.Banned -> {
+                    log("403 Forbidden - IP $clientIp is temporarily banned (${check.remainingSeconds}s remaining)")
+                    val json = "{\"error\":\"Too many failed attempts. IP banned for ${check.remainingSeconds} more seconds.\"}"
+                    sendResponse(outputStream, 403, "Forbidden", "application/json; charset=utf-8", json.toByteArray(StandardCharsets.UTF_8))
+                    return
+                }
+                is RateLimitResult.RateExceeded -> {
+                    log("429 Too Many Requests - IP $clientIp exceeded rate limit ($maxRequestsPerSecond req/s)")
+                    val json = "{\"error\":\"Rate limit exceeded. Please slow down.\"}"
+                    sendResponse(outputStream, 429, "Too Many Requests", "application/json; charset=utf-8", json.toByteArray(StandardCharsets.UTF_8))
+                    return
+                }
+                is RateLimitResult.Allowed -> {
+                    // Proceed
+                }
+            }
 
             // Parse headers
             val headers = mutableMapOf<String, String>()
@@ -127,27 +192,44 @@ class StreamingHttpServer(
             val queryStr = if (questionMark >= 0) rawPath.substring(questionMark + 1) else ""
             val queryParams = parseQueryParams(queryStr)
 
-            log("$method $path (Range: ${headers["range"] ?: "none"})")
-
             // Handle CORS OPTIONS preflight
             if (method == "OPTIONS") {
                 sendCorsOptionsResponse(outputStream)
                 return
             }
 
-            // PIN Security Verification
-            val requestPin = queryParams["pin"]
+            // 2. Cryptographic Token / PIN Security Verification
+            val requestToken = queryParams["token"]
+                ?: queryParams["pin"]
+                ?: headers["x-auth-token"]
                 ?: headers["x-pin"]
                 ?: headers["authorization"]?.removePrefix("Bearer ")?.trim()
 
-            if (requestPin != pin) {
-                log("401 Unauthorized - Invalid PIN token: '$requestPin'")
-                val json = "{\"error\":\"Unauthorized: Invalid or missing PIN token\"}"
+            val isAuthorizedToken = requestToken != null && authorizedSessions.containsKey(requestToken)
+            val isLegacyPin = requestToken != null && requestToken == pin
+
+            if (!isAuthorizedToken && !isLegacyPin) {
+                val isBanned = rateLimiter.recordFailedAuth(clientIp)
+                log("401 Unauthorized - Invalid token/PIN from $clientIp. ${if (isBanned) "IP BANNED!" else ""}")
+                val json = "{\"error\":\"Unauthorized: Invalid or missing token/PIN\"}"
                 sendResponse(outputStream, 401, "Unauthorized", "application/json; charset=utf-8", json.toByteArray(StandardCharsets.UTF_8))
                 return
             }
 
-            // Route Requests
+            // Record successful authentication to clear failure counters
+            rateLimiter.recordSuccessfulAuth(clientIp)
+
+            // Update session last seen
+            if (isAuthorizedToken) {
+                authorizedSessions[requestToken]?.apply {
+                    lastSeenAt = System.currentTimeMillis()
+                    this.ipAddress = clientIp
+                }
+            }
+
+            log("$method $path (IP: $clientIp, Range: ${headers["range"] ?: "none"})")
+
+            // 3. Route Requests
             when {
                 path == "/files" && method == "GET" -> {
                     handleGetFiles(outputStream)
@@ -155,6 +237,17 @@ class StreamingHttpServer(
                 path.startsWith("/stream/") && (method == "GET" || method == "HEAD") -> {
                     val fileId = path.removePrefix("/stream/")
                     handleStream(outputStream, fileId, method, headers["range"])
+                }
+                path == "/status" && method == "GET" -> {
+                    val status = mapOf(
+                        "server" to "LocalStream",
+                        "status" to "online",
+                        "https" to useHttps,
+                        "authorizedDevices" to authorizedSessions.size,
+                        "filesCount" to filesMap.size
+                    )
+                    val json = gson.toJson(status)
+                    sendResponse(outputStream, 200, "OK", "application/json; charset=utf-8", json.toByteArray(StandardCharsets.UTF_8))
                 }
                 else -> {
                     val notFound = "{\"error\":\"Endpoint not found: $path\"}"
@@ -325,7 +418,7 @@ class StreamingHttpServer(
     private fun sendCorsOptionsResponse(out: OutputStream) {
         val response = "HTTP/1.1 200 OK\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
-                "Access-Control-Allow-Headers: Range, X-PIN, Authorization, Content-Type\r\n" +
+                "Access-Control-Allow-Headers: Range, X-PIN, X-Auth-Token, Authorization, Content-Type\r\n" +
                 "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
                 "Access-Control-Max-Age: 86400\r\n" +
                 "Content-Length: 0\r\n" +

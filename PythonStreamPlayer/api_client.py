@@ -1,15 +1,32 @@
 import urllib.parse
+import urllib3
 import requests
+
+# Suppress self-signed certificate warnings for local hotspot streaming
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 class PinAuthError(Exception):
     pass
 
+
+class RateLimitError(Exception):
+    pass
+
+
+class IpBannedError(Exception):
+    pass
+
+
 class ServerConnError(Exception):
     pass
+
 
 class StreamApiClient:
     def __init__(self):
         self.session = requests.Session()
+        # Disable SSL verification for self-signed certificates on local network
+        self.session.verify = False
 
     @staticmethod
     def normalize_url(server_url: str) -> str:
@@ -30,24 +47,35 @@ class StreamApiClient:
         val = size_bytes / (1024 ** digit_groups)
         return f"{val:.1f} {units[digit_groups]}"
 
-    def build_stream_url(self, base_url: str, file_id: str, pin: str) -> str:
+    def build_stream_url(self, base_url: str, file_id: str, token: str) -> str:
         base = self.normalize_url(base_url)
-        encoded_pin = urllib.parse.quote(pin.strip() if pin else "")
-        return f"{base}/stream/{file_id}?pin={encoded_pin}"
+        encoded_token = urllib.parse.quote(token.strip() if token else "")
+        return f"{base}/stream/{file_id}?token={encoded_token}"
 
-    def fetch_files(self, server_url: str, pin: str) -> list[dict]:
+    def fetch_files(self, server_url: str, token: str) -> list[dict]:
         base = self.normalize_url(server_url)
-        encoded_pin = urllib.parse.quote(pin.strip() if pin else "")
-        endpoint = f"{base}/files?pin={encoded_pin}"
+        encoded_token = urllib.parse.quote(token.strip() if token else "")
+        endpoint = f"{base}/files?token={encoded_token}"
         headers = {
             "Accept": "application/json",
-            "X-PIN": pin.strip() if pin else ""
+            "X-Auth-Token": token.strip() if token else "",
+            "X-PIN": token.strip() if token else ""
         }
 
         try:
             resp = self.session.get(endpoint, headers=headers, timeout=8)
             if resp.status_code == 401:
-                raise PinAuthError("Invalid or missing PIN token! Please verify the PIN shown in the Android app.")
+                raise PinAuthError(
+                    "Unauthorized: Session token or PIN was not recognized.\n"
+                    "Tap 'Scan Laptop QR' in the Android app to authorize this laptop instantly!"
+                )
+            if resp.status_code == 403:
+                raise IpBannedError(
+                    "Access Blocked: Your IP address is temporarily banned due to excessive failed attempts.\n"
+                    "Please wait for the ban duration to expire or unban in the Android app."
+                )
+            if resp.status_code == 429:
+                raise RateLimitError("Rate limit exceeded! Please wait a few seconds before trying again.")
             if resp.status_code != 200:
                 raise ServerConnError(f"Server returned HTTP {resp.status_code}: {resp.text}")
 
@@ -55,13 +83,13 @@ class StreamApiClient:
             if not isinstance(data, list):
                 return []
             return data
-        except PinAuthError:
+        except (PinAuthError, RateLimitError, IpBannedError):
             raise
         except requests.exceptions.RequestException as e:
             raise ServerConnError(
                 f"Failed to connect to server at {base}.\n"
-                f"Ensure your laptop is connected to the Android hotspot or same Wi-Fi, "
-                f"and that 'Start Server' is active in the Android app.\nError: {e}"
+                f"Ensure your laptop is connected to the phone's Hotspot or Wi-Fi, "
+                f"and that 'Start Server' is active.\nError: {e}"
             )
         except Exception as e:
             raise ServerConnError(f"Error fetching files: {e}")

@@ -7,6 +7,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaMetaData
 from PyQt6.QtMultimediaWidgets import QVideoWidget
+from PyQt6.QtNetwork import QSslConfiguration, QSslSocket
+
+# Allow self-signed TLS certificates for end-to-end encrypted local streaming
+try:
+    _ssl_conf = QSslConfiguration.defaultConfiguration()
+    _ssl_conf.setPeerVerifyMode(QSslSocket.PeerVerifyMode.VerifyNone)
+    QSslConfiguration.setDefaultConfiguration(_ssl_conf)
+except Exception:
+    pass
+
 
 
 class PlayerWindow(QWidget):

@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from api_client import StreamApiClient
 from player_window import PlayerWindow
 from wake_manager import ScreenWakeManager
+from pairing_dialog import PairingQrDialog
 
 app = QApplication.instance()
 if app is None:
@@ -23,7 +24,7 @@ class TestStreamApiClient(unittest.TestCase):
 
     def test_build_stream_url(self):
         url = self.client.build_stream_url("http://192.168.43.1:8080", "12", "8492")
-        self.assertEqual(url, "http://192.168.43.1:8080/stream/12?pin=8492")
+        self.assertEqual(url, "http://192.168.43.1:8080/stream/12?token=8492")
 
     def test_format_size(self):
         self.assertEqual(self.client.format_size(10485760), "10.0 MB")
@@ -94,12 +95,31 @@ class TestScreenWakeManager(unittest.TestCase):
         self.assertFalse(mgr.is_running)
 
 
+class TestPairingQrDialog(unittest.TestCase):
+    def test_qr_dialog_initialization(self):
+        dialog = PairingQrDialog(initial_token="custom_token_1234567890abcdef")
+        self.assertEqual(dialog.get_token(), "custom_token_1234567890abcdef")
+        self.assertIsNotNone(dialog.qr_label.pixmap())
+        self.assertFalse(dialog.qr_label.pixmap().isNull())
+
+    def test_qr_dialog_token_generation(self):
+        dialog = PairingQrDialog()
+        token = dialog.get_token()
+        self.assertGreaterEqual(len(token), 32)
+        old_token = token
+        dialog._regenerate_token()
+        new_token = dialog.get_token()
+        self.assertNotEqual(old_token, new_token)
+        self.assertGreaterEqual(len(new_token), 32)
+
+
 if __name__ == "__main__":
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)
     suite = unittest.TestLoader().loadTestsFromNames([
         'test_client.TestStreamApiClient',
         'test_client.TestPlayerWindow',
-        'test_client.TestScreenWakeManager'
+        'test_client.TestScreenWakeManager',
+        'test_client.TestPairingQrDialog'
     ])
     result = runner.run(suite)
     sys.exit(0 if result.wasSuccessful() else 1)

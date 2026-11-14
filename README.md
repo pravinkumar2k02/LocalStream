@@ -1,35 +1,44 @@
 # End-to-End Local Streaming System
 
-An end-to-end local media streaming solution consisting of:
-1. **Android Streaming Server**: Picks a folder from device storage via SAF and exposes an HTTP API over mobile hotspot / Wi-Fi with PIN security and HTTP range requests (`206 Partial Content`).
-2. **Python Desktop Player (PyQt6)**: Laptop player with native MKV, AVI, MP4, and WebM decoding via Qt 6.5+ FFmpeg engine, audio track selection, embedded subtitle selection, 10s arrow key skipping, and true edge-to-edge fullscreen with auto-hiding controls.
+An end-to-end, high-security local media streaming solution consisting of:
+1. **Android Streaming Server**: Picks a folder from device storage via SAF, encrypts traffic over **HTTPS / TLS 1.3** with RSA-2048 keys, manages multi-device sessions via camera QR code scanning, and enforces custom configurable sliding-window rate limiting.
+2. **Python Desktop Player (PyQt6)**: Laptop player with native MKV, AVI, MP4, and WebM decoding via Qt 6.5+ FFmpeg engine, audio track selection, embedded subtitle selection, 10s arrow key skipping, anti-sleep screen wake protection, and true edge-to-edge fullscreen with auto-hiding controls.
 
 ---
 
-## 🌟 Architecture Overview
+## 🔒 Security Architecture (Option B)
 
 ```
-+------------------------------------------+          Wi-Fi / Hotspot           +------------------------------------------+
-|          Android Mobile Device           | <================================> |           Laptop Desktop Client          |
-|                                          |                                    |                                          |
-|  [ SAF Folder Picker ]                   |                                    |  [ PythonStreamPlayer (PyQt6) ]          |
-|          |                               |                                    |     - Server URL & PIN Connection Bar    |
-|          v                               |                                    |     - Filterable Media Table (Video/Audio|
-|  [ Media Files Map ]                     |                                    |          |                               |
-|          |                               |                                    |          v                               |
-|          v                               |                                    |  [ PlayerWindow ]                        |
-|  [ StreamingHttpServer ]                 |                                    |     - Native MKV, AVI, MP4, WebM (FFmpeg)|
-|     - Port 8080 (0.0.0.0)                |      GET /files?pin=XXXX           |     - Multi-Audio Track Selection        |
-|     - PIN Security (Header / Query)      | ---------------------------------> |     - Embedded Subtitle Track Selection  |
-|     - GET /files -> JSON metadata        | <--------------------------------- |     - 10s Skip via Arrow Keys (← / →)    |
-|     - GET /stream/{id}                   |         JSON File Listing          |     - Edge-to-Edge Fullscreen (F / F11)  |
-|        * HTTP 200 (Full content)         |                                    |     - Auto-Hiding Controls on Idle       |
-|        * HTTP 206 (Range Seeking)        |      GET /stream/1?pin=XXXX        |     - Wake Controls on Mouse Movement    |
-|                                          |      (Range: bytes=1048576-...)    |                                          |
-|  [ Foreground Service & Notification ]   | <--------------------------------- |                                          |
-|                                          |      HTTP 206 Partial Content      |                                          |
-+------------------------------------------+ ---------------------------------> +------------------------------------------+
++------------------------------------------+          TLS 1.3 / HTTPS (Port 8443)        +------------------------------------------+
+|          Android Mobile Device           | <=========================================> |           Laptop Desktop Client          |
+|                                          |                                             |                                          |
+|  [ Camera QR Scanner (ZXing) ]           |  1. Laptop displays dynamic 256-bit QR      |  [ PythonStreamPlayer (PyQt6) ]          |
+|          |                               |     `localstream://auth?token=...`          |     - Click "📱 Pair (QR)"               |
+|          v                               | <------------------------------------------ |     - Generates 256-bit crypto token     |
+|  [ Multi-Device Session Store ]          |  2. Android camera scans & authorizes token |     - Shows High-Contrast QR Code        |
+|     - Multiple live clients supported    |                                             |                                          |
+|     - Individual device revocation       |  3. Encrypted HTTPS GET /files (Bearer Auth)|                                          |
+|          |                               | <------------------------------------------ |     - Filterable Media Table             |
+|          v                               |  4. Encrypted JSON File Listing             |          |                               |
+|  [ Configurable Rate Limiter ]           | ------------------------------------------> |          v                               |
+|     - Sliding window (5-200 req/s)       |                                             |  [ PlayerWindow ]                        |
+|     - Max failed attempts (3-20)         |  5. Range Seek GET /stream/{id} (TLS 1.3)   |     - Native MKV, AVI, MP4, WebM (FFmpeg)|
+|     - Auto temporary IP ban (403/429)    | <------------------------------------------ |     - Multi-Audio Track Selection        |
+|          |                               |  6. HTTP 206 Partial Content (AES-256)      |     - Embedded Subtitle Track Selection  |
+|          v                               | ------------------------------------------> |     - 10s Skip via Arrow Keys (← / →)    |
+|  [ HTTPS / TLS 1.3 Server ]              |                                             |     - Edge-to-Edge Fullscreen (F / F11)  |
+|     - In-memory RSA-2048 Keypair         |                                             |     - Auto-Hiding Controls on Idle       |
+|     - Self-signed X.509 Certificate      |                                             |     - Screen Wake Manager (No Sleep)     |
++------------------------------------------+                                             +------------------------------------------+
 ```
+
+### Security & Privacy Highlights:
+- **End-to-End Transport Encryption**: Full **TLS 1.3 / HTTPS** encryption using in-memory RSA-2048 certificate generation on Android. Prevents eavesdropping and packet sniffing on open Wi-Fi / Hotspot networks.
+- **Dynamic 256-bit Session Tokens**: Laptop generates cryptographically random 256-bit tokens (`secrets.token_hex(32)`).
+- **Camera QR Code Pairing**: Zero-friction pairing: user taps **"📷 Scan Laptop QR"** on phone and points at laptop screen to authorize.
+- **Multi-Device Live Sessions**: Multiple devices (laptop, tablet, TV) can be paired and stream concurrently without disconnecting existing sessions. Devices can be revoked individually from the Android UI.
+- **Configurable Rate Limiting & Brute-Force Defense**: Built-in sliding-window limiter with customizable requests-per-second and maximum failed attempt thresholds before automatic IP temporary bans (HTTP 429 / 403).
+- **Scoped Storage Isolation**: The Android app uses Android Storage Access Framework (SAF) in read-only mode for the chosen folder. No client or remote entity can access other storage or write to device memory.
 
 ---
 
@@ -37,36 +46,39 @@ An end-to-end local media streaming solution consisting of:
 
 ```
 LocalStream/
-├── LocalStreamServer.apk            # Pre-compiled Android APK (ready to install)
+├── LocalStreamServer.apk            # Pre-compiled Android APK with TLS 1.3 & QR Scanner
 ├── run-desktop-player.bat           # 1-Click launcher for Python Desktop Player
 ├── run-desktop-player.ps1           # PowerShell launcher for Python Desktop Player
 ├── README.md                        # Documentation
 │
 ├── PythonStreamPlayer/              # High-Performance Python Client (PyQt6)
-│   ├── main.py                      # Connection manager & searchable file table UI
+│   ├── main.py                      # Connection manager, pairing & searchable file table UI
+│   ├── pairing_dialog.py            # Dynamic 256-bit QR Code display dialog
 │   ├── player_window.py             # Video player with MKV/AVI/MP4, audio/sub tracks, fullscreen
-│   ├── api_client.py                # HTTP REST client with PIN auth & URL normalization
-│   ├── requirements.txt             # PyQt6>=6.5.0, requests>=2.28.0
-│   ├── test_client.py               # Automated test suite (8 tests)
+│   ├── api_client.py                # HTTPS client with TLS verify bypass & token headers
+│   ├── wake_manager.py              # Anti-sleep background activity & Windows power management
+│   ├── requirements.txt             # PyQt6>=6.5.0, requests, qrcode, pillow
+│   ├── test_client.py               # Automated test suite (11 unit tests)
 │   └── README.md
 │
 ├── AndroidStreamServer/             # Android Application
 │   ├── app/
 │   │   ├── src/main/java/com/localstream/server/
 │   │   │   ├── model/MediaFile.kt                 # Data model with formatting & type detection
-│   │   │   ├── server/StreamingHttpServer.kt      # Multi-threaded HTTP server with Range & PIN support
-│   │   │   ├── service/StreamingService.kt        # Foreground service with persistent notification
+│   │   │   ├── model/DeviceSession.kt             # Cryptographic device session model
+│   │   │   ├── server/StreamingHttpServer.kt      # Multi-threaded HTTPS/HTTP server with Range & Auth
+│   │   │   ├── server/CertificateHelper.kt        # In-memory RSA-2048 & X.509 TLS certificate builder
+│   │   │   ├── server/RateLimiter.kt              # Sliding window & brute-force IP rate limiter
+│   │   │   ├── service/StreamingService.kt        # Foreground service with multi-device state
 │   │   │   ├── util/StorageHelper.kt              # Storage Access Framework folder scanning
 │   │   │   ├── util/NetworkUtils.kt               # Hotspot & Wi-Fi IP address resolution
-│   │   │   ├── ui/StreamingViewModel.kt           # Reactive state management
-│   │   │   └── MainActivity.kt                    # Jetpack Compose Material 3 UI
-│   │   ├── src/test/java/                         # Unit tests for HTTP Range Request parsing
-│   │   └── AndroidManifest.xml
-│   ├── build.gradle.kts
-│   └── LocalStreamServer.apk
+│   │   │   ├── ui/StreamingViewModel.kt           # Reactive state, QR scan handler & session management
+│   │   │   └── MainActivity.kt                    # Jetpack Compose UI with ZXing QR Camera Scanner
+│   │   ├── src/test/java/                         # Unit tests
+│   │   └── AndroidManifest.xml                    # Camera and foreground service permissions
+│   └── build.gradle.kts                           # BouncyCastle and ZXing dependencies
 │
 └── DesktopStreamPlayer/             # Optional Java Desktop Client
-    └── ...
 ```
 
 ---
@@ -75,27 +87,28 @@ LocalStream/
 
 ### Step 1: Set up the Android Device
 1. **Install the App**:
-   Transfer and install `LocalStreamServer.apk` on your Android phone, or run:
+   Install `LocalStreamServer.apk` on your Android phone, or run:
    ```cmd
    adb install -r LocalStreamServer.apk
    ```
 2. **Turn on Mobile Hotspot**:
-   - Go to **Settings > Network & internet > Hotspot & tethering > Wi-Fi hotspot** and turn it ON.
-   - Alternatively, connect both your Android phone and laptop to the same Wi-Fi router.
+   - Turn on Hotspot or connect both phone and laptop to the same Wi-Fi network.
 3. **Select Folder & Start Server**:
    - Open **Local Stream Server**.
-   - Tap **"Pick Folder"** and choose any folder containing movies or music.
-   - Tap **"Start Server"**. The app displays:
-     - **Server IP**: e.g., `http://192.168.43.1:8080`
-     - **PIN Token**: e.g., `8492`
+   - Tap **"Pick Folder"** and choose any directory containing movies or audio.
+   - Adjust **Security & Rate Limiting** settings if desired (HTTPS toggle, req/s limit, max failed attempts).
+   - Tap **"Start Server"**. The app displays the active server addresses (e.g. `https://192.168.43.1:8443` or `http://192.168.43.1:8080`).
 
 ---
 
-### Step 2: Run the Laptop Player (Python)
-1. Connect your laptop Wi-Fi to the phone's Hotspot (or same Wi-Fi network).
-2. Double-click `run-desktop-player.bat` (or run `run-desktop-player.ps1`).
-3. Enter the Server URL and 4-digit PIN, then click **Connect**.
-4. Browse or filter the file list, and click **▶ Play** (or double-click any row).
+### Step 2: Run and Pair the Laptop Player (Python)
+1. Double-click `run-desktop-player.bat` (or run `run-desktop-player.ps1`).
+2. Click **"📱 Pair (QR)"** in the top bar of the laptop player.
+3. On your phone, tap **"📷 Scan Laptop QR"** and point the camera at the QR code on the laptop screen.
+   - The phone immediately displays: `Authorized: <Your-Laptop-Name>`.
+   - The existing connection remains active even if other devices are already connected.
+4. On the laptop, click **"✅ Use This Token & Connect"** (or click **"⚡ Connect"**).
+5. Browse or filter the file list, and click **▶ Play** (or double-click any row).
 
 ---
 
@@ -117,3 +130,18 @@ LocalStream/
 | **Down Arrow (`↓`)** | Decrease volume (-5%) |
 | **M** | Toggle Mute |
 | **Speed Dropdown** | Adjust playback speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x) |
+| **Keep Screen Awake** | Prevents laptop screen timeout/dimming while the app runs |
+
+---
+
+## 🧪 Testing
+
+Run the automated Python test suite:
+```cmd
+cd PythonStreamPlayer
+python test_client.py
+```
+Outputs:
+```
+Ran 11 tests in 3.1s - OK
+```

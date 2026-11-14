@@ -6,9 +6,19 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QMessageBox, QCheckBox
 )
-from api_client import StreamApiClient, PinAuthError, ServerConnError
+from PyQt6.QtNetwork import QSslConfiguration, QSslSocket
+from api_client import StreamApiClient, PinAuthError, ServerConnError, RateLimitError, IpBannedError
 from player_window import PlayerWindow
 from wake_manager import ScreenWakeManager
+from pairing_dialog import PairingQrDialog
+
+# Allow self-signed TLS certificates for end-to-end encrypted local streaming
+try:
+    _ssl_conf = QSslConfiguration.defaultConfiguration()
+    _ssl_conf.setPeerVerifyMode(QSslSocket.PeerVerifyMode.VerifyNone)
+    QSslConfiguration.setDefaultConfiguration(_ssl_conf)
+except Exception:
+    pass
 
 
 class FetchWorker(QThread):
@@ -72,15 +82,20 @@ class MainWindow(QMainWindow):
         self.url_input = QLineEdit("http://192.168.43.1:8080")
         self.url_input.setFixedWidth(200)
 
-        pin_lbl = QLabel("PIN Token:")
+        pin_lbl = QLabel("Key / PIN:")
         self.pin_input = QLineEdit()
-        self.pin_input.setPlaceholderText("4-digit PIN")
-        self.pin_input.setFixedWidth(90)
+        self.pin_input.setPlaceholderText("PIN or Token")
+        self.pin_input.setFixedWidth(130)
         self.pin_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.show_pin_cb = QCheckBox("Show")
         self.show_pin_cb.setStyleSheet("color: #AAAAAA; font-size: 11px;")
         self.show_pin_cb.toggled.connect(self._toggle_pin_visibility)
+
+        self.pair_btn = QPushButton("📱 Pair (QR)")
+        self.pair_btn.setToolTip("Display high-entropy session QR code to scan with Android camera")
+        self.pair_btn.setStyleSheet("background-color: #6200EA; color: white;")
+        self.pair_btn.clicked.connect(self._open_pairing_qr)
 
         self.connect_btn = QPushButton("⚡ Connect")
         self.connect_btn.setStyleSheet("background-color: #2979FF; color: white;")
@@ -95,6 +110,7 @@ class MainWindow(QMainWindow):
         conn_bar.addWidget(pin_lbl)
         conn_bar.addWidget(self.pin_input)
         conn_bar.addWidget(self.show_pin_cb)
+        conn_bar.addWidget(self.pair_btn)
         conn_bar.addWidget(self.connect_btn)
         conn_bar.addWidget(self.status_lbl)
         conn_bar.addStretch(1)
@@ -138,13 +154,21 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
 
         # Bottom Hint Bar
-        hint = QLabel("💡 Tip: Turn on Android Hotspot, connect your laptop to it, enter Server IP & PIN, and click Connect. Screen will stay awake until you close this app.")
+        hint = QLabel("💡 Tip: Click '📱 Pair (QR)' and scan it with the Android camera to pair instantly, or enter PIN/Token. Screen stays awake while app is open.")
         hint.setStyleSheet("color: #777777; font-size: 11px;")
 
         layout.addLayout(conn_bar)
         layout.addLayout(filter_bar)
         layout.addWidget(self.table, stretch=1)
         layout.addWidget(hint)
+
+    def _open_pairing_qr(self):
+        current_token = self.pin_input.text().strip()
+        dialog = PairingQrDialog(self, initial_token=current_token if len(current_token) >= 8 else None)
+        if dialog.exec():
+            token = dialog.get_token()
+            self.pin_input.setText(token)
+            self._connect_server()
 
     def _toggle_pin_visibility(self, checked: bool):
         mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
@@ -191,7 +215,18 @@ class MainWindow(QMainWindow):
         self.connect_btn.setEnabled(True)
         self.status_lbl.setText("Connection Failed")
         self.status_lbl.setStyleSheet("color: #FF5252;")
-        QMessageBox.critical(self, "Connection Error", err_msg)
+        if "429" in err_msg or "Rate limit" in err_msg:
+            QMessageBox.warning(
+                self, "Rate Limit Reached (429)",
+                f"{err_msg}\n\nThe Android server's rate limiter throttled requests. Please wait a moment before retrying."
+            )
+        elif "403" in err_msg or "temporarily banned" in err_msg:
+            QMessageBox.critical(
+                self, "IP Temporarily Blocked (403)",
+                f"{err_msg}\n\nToo many invalid token attempts. Please check your token or re-pair with the Android app QR scanner."
+            )
+        else:
+            QMessageBox.critical(self, "Connection Error", err_msg)
 
     def _filter_table(self):
         query = self.search_input.text().lower().strip()

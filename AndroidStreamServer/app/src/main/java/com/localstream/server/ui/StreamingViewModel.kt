@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
+import com.localstream.server.model.DeviceSession
 import com.localstream.server.model.MediaFile
 import com.localstream.server.service.StreamingService
 import com.localstream.server.util.NetworkAddressInfo
@@ -14,19 +16,29 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 class StreamingViewModel(application: Application) : AndroidViewModel(application) {
 
     val isRunning: StateFlow<Boolean> = StreamingService.isRunning
+    val isHttps: StateFlow<Boolean> = StreamingService.isHttps
     val files: StateFlow<List<MediaFile>> = StreamingService.scannedFiles
     val serverLogs: StateFlow<List<String>> = StreamingService.serverLogs
+    val authorizedDevices: StateFlow<List<DeviceSession>> = StreamingService.authorizedDevices
 
     private val _currentPin = MutableStateFlow(generateRandomPin())
     val currentPin: StateFlow<String> = _currentPin.asStateFlow()
 
     private val _port = MutableStateFlow(8080)
     val port: StateFlow<Int> = _port.asStateFlow()
+
+    private val _useHttps = MutableStateFlow(false)
+    val useHttps: StateFlow<Boolean> = _useHttps.asStateFlow()
+
+    private val _rateLimit = MutableStateFlow(30) // requests per second
+    val rateLimit: StateFlow<Int> = _rateLimit.asStateFlow()
+
+    private val _maxFailedAttempts = MutableStateFlow(5)
+    val maxFailedAttempts: StateFlow<Int> = _maxFailedAttempts.asStateFlow()
 
     private val _selectedFolderUri = MutableStateFlow<Uri?>(null)
     val selectedFolderUri: StateFlow<Uri?> = _selectedFolderUri.asStateFlow()
@@ -39,6 +51,8 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _networkAddresses = MutableStateFlow<List<NetworkAddressInfo>>(emptyList())
     val networkAddresses: StateFlow<List<NetworkAddressInfo>> = _networkAddresses.asStateFlow()
+
+    private val gson = Gson()
 
     init {
         refreshNetworkAddresses()
@@ -55,11 +69,70 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
         StreamingService.updatePin(newPin)
     }
 
+    fun setUseHttps(enabled: Boolean) {
+        _useHttps.value = enabled
+        if (enabled && _port.value == 8080) {
+            _port.value = 8443
+        } else if (!enabled && _port.value == 8443) {
+            _port.value = 8080
+        }
+    }
+
+    fun setRateLimit(limit: Int) {
+        _rateLimit.value = limit.coerceIn(5, 200)
+        StreamingService.updateRateLimitSettings(_rateLimit.value, _maxFailedAttempts.value, 60)
+    }
+
+    fun setMaxFailedAttempts(max: Int) {
+        _maxFailedAttempts.value = max.coerceIn(3, 20)
+        StreamingService.updateRateLimitSettings(_rateLimit.value, _maxFailedAttempts.value, 60)
+    }
+
+    fun onQrCodeScanned(contents: String): Pair<Boolean, String> {
+        try {
+            var token = ""
+            var clientName = "Laptop"
+
+            if (contents.startsWith("localstream://auth")) {
+                val uri = Uri.parse(contents)
+                token = uri.getQueryParameter("token") ?: ""
+                clientName = uri.getQueryParameter("client") ?: "Laptop Client"
+            } else if (contents.trim().startsWith("{")) {
+                @Suppress("UNCHECKED_CAST")
+                val map = gson.fromJson(contents, Map::class.java) as Map<String, Any>
+                token = map["token"]?.toString() ?: ""
+                clientName = map["client"]?.toString() ?: "Laptop Client"
+            } else {
+                // Raw token string
+                token = contents.trim()
+                clientName = "Device-${token.take(6)}"
+            }
+
+            if (token.length < 8) {
+                return Pair(false, "Scanned QR code does not contain a valid session token.")
+            }
+
+            StreamingService.authorizeDevice(token, clientName)
+            return Pair(true, "Authorized: $clientName")
+        } catch (e: Exception) {
+            return Pair(false, "Error parsing QR code: ${e.message}")
+        }
+    }
+
+    fun authorizeManualToken(token: String, clientName: String = "Manual Client"): Boolean {
+        if (token.isBlank()) return false
+        StreamingService.authorizeDevice(token.trim(), clientName.ifBlank { "Manual Client" })
+        return true
+    }
+
+    fun revokeDevice(token: String) {
+        StreamingService.revokeDevice(token)
+    }
+
     fun onFolderSelected(uri: Uri) {
         _selectedFolderUri.value = uri
         StorageHelper.takePersistablePermissions(getApplication(), uri)
 
-        // Extract folder display name
         val path = uri.path ?: uri.toString()
         val displayName = path.substringAfterLast(':').substringAfterLast('/')
         _selectedFolderName.value = if (displayName.isNotBlank()) displayName else "Selected Folder"
@@ -89,6 +162,9 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
                 action = StreamingService.ACTION_START
                 putExtra(StreamingService.EXTRA_PORT, _port.value)
                 putExtra(StreamingService.EXTRA_PIN, _currentPin.value)
+                putExtra(StreamingService.EXTRA_USE_HTTPS, _useHttps.value)
+                putExtra(StreamingService.EXTRA_RATE_LIMIT, _rateLimit.value)
+                putExtra(StreamingService.EXTRA_MAX_FAILED, _maxFailedAttempts.value)
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

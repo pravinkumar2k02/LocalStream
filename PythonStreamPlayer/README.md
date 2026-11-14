@@ -43,6 +43,12 @@ A modern, high-performance local video streaming player built with Python and **
    - Playback speed selector (`0.5x`, `0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x`).
    - Copy Stream URL button.
 
+8. **Zero-Friction QR Code Pairing & Cryptographic Token Auth**:
+   - Generates dynamic 256-bit session tokens (`secrets.token_hex(32)`).
+   - Click **"📱 Pair (QR)"** to display a scannable QR code on screen.
+   - The Android app scans the QR code with its built-in camera scanner, instantly authorizing this laptop session without disturbing other streaming clients.
+   - Automatically supports **TLS 1.3 / HTTPS** streams with self-signed certificate acceptance.
+
 ---
 
 ## ⌨️ Keyboard Shortcuts
