@@ -1,0 +1,29 @@
+# Gradle build directories and caches
+.gradle/
+**/build/
+**/.gradle/
+**/bin/
+build/
+dist/
+**/dist/
+
+# Local configuration
+local.properties
+
+# Android specific
+.cxx/
+capture/
+*.apk
+!LocalStreamServer.apk
+
+# IDE configuration
+.idea/
+*.iml
+.vscode/
+*.ipr
+*.iws
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
