@@ -34,6 +34,9 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
     private val _useHttps = MutableStateFlow(true)
     val useHttps: StateFlow<Boolean> = _useHttps.asStateFlow()
 
+    private val _pinAuthEnabled = MutableStateFlow(false)
+    val pinAuthEnabled: StateFlow<Boolean> = _pinAuthEnabled.asStateFlow()
+
     private val _rateLimit = MutableStateFlow(30) // requests per second
     val rateLimit: StateFlow<Int> = _rateLimit.asStateFlow()
 
@@ -69,6 +72,11 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
         StreamingService.updatePin(newPin)
     }
 
+    fun setPinAuthEnabled(enabled: Boolean) {
+        _pinAuthEnabled.value = enabled
+        StreamingService.updatePinAuthEnabled(enabled)
+    }
+
     fun setUseHttps(enabled: Boolean) {
         _useHttps.value = enabled
         _port.value = if (enabled) 8443 else 8080
@@ -78,6 +86,7 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
                 action = StreamingService.ACTION_RESTART
                 putExtra(StreamingService.EXTRA_PORT, _port.value)
                 putExtra(StreamingService.EXTRA_PIN, _currentPin.value)
+                putExtra(StreamingService.EXTRA_PIN_AUTH_ENABLED, _pinAuthEnabled.value)
                 putExtra(StreamingService.EXTRA_USE_HTTPS, _useHttps.value)
                 putExtra(StreamingService.EXTRA_RATE_LIMIT, _rateLimit.value)
                 putExtra(StreamingService.EXTRA_MAX_FAILED, _maxFailedAttempts.value)
@@ -174,6 +183,7 @@ class StreamingViewModel(application: Application) : AndroidViewModel(applicatio
                 action = StreamingService.ACTION_START
                 putExtra(StreamingService.EXTRA_PORT, _port.value)
                 putExtra(StreamingService.EXTRA_PIN, _currentPin.value)
+                putExtra(StreamingService.EXTRA_PIN_AUTH_ENABLED, _pinAuthEnabled.value)
                 putExtra(StreamingService.EXTRA_USE_HTTPS, _useHttps.value)
                 putExtra(StreamingService.EXTRA_RATE_LIMIT, _rateLimit.value)
                 putExtra(StreamingService.EXTRA_MAX_FAILED, _maxFailedAttempts.value)

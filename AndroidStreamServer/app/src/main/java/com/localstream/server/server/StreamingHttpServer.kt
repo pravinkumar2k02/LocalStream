@@ -29,6 +29,7 @@ class StreamingHttpServer(
     private val context: Context,
     val port: Int = 8080,
     var pin: String = "8492",
+    var pinAuthEnabled: Boolean = false,
     var useHttps: Boolean = false,
     var maxRequestsPerSecond: Int = 30,
     var maxFailedAttempts: Int = 5,
@@ -206,12 +207,17 @@ class StreamingHttpServer(
                 ?: headers["authorization"]?.removePrefix("Bearer ")?.trim()
 
             val isAuthorizedToken = requestToken != null && authorizedSessions.containsKey(requestToken)
-            val isLegacyPin = requestToken != null && requestToken == pin
+            val isLegacyPin = pinAuthEnabled && requestToken != null && requestToken == pin
 
             if (!isAuthorizedToken && !isLegacyPin) {
                 val isBanned = rateLimiter.recordFailedAuth(clientIp)
-                log("401 Unauthorized - Invalid token/PIN from $clientIp. ${if (isBanned) "IP BANNED!" else ""}")
-                val json = "{\"error\":\"Unauthorized: Invalid or missing token/PIN\"}"
+                val errorMsg = if (!pinAuthEnabled && requestToken == pin) {
+                    "PIN authentication is currently disabled on the server. Please scan the QR code to pair, or turn ON the PIN toggle in the Android app."
+                } else {
+                    "Unauthorized: Invalid or missing token/PIN"
+                }
+                log("401 Unauthorized - $errorMsg from $clientIp. ${if (isBanned) "IP BANNED!" else ""}")
+                val json = "{\"error\":\"$errorMsg\"}"
                 sendResponse(outputStream, 401, "Unauthorized", "application/json; charset=utf-8", json.toByteArray(StandardCharsets.UTF_8))
                 return
             }

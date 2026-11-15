@@ -72,6 +72,7 @@ fun MainScreen(viewModel: StreamingViewModel) {
     val isHttps by viewModel.isHttps.collectAsState()
     val useHttps by viewModel.useHttps.collectAsState()
     val pin by viewModel.currentPin.collectAsState()
+    val pinAuthEnabled by viewModel.pinAuthEnabled.collectAsState()
     val port by viewModel.port.collectAsState()
     val rateLimit by viewModel.rateLimit.collectAsState()
     val maxFailedAttempts by viewModel.maxFailedAttempts.collectAsState()
@@ -436,18 +437,74 @@ fun MainScreen(viewModel: StreamingViewModel) {
                         HorizontalDivider()
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Legacy Fallback PIN
+                        // 4-Digit PIN Authentication Toggle
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text("Fallback 4-Digit PIN: $pin", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
-                                Text("Available as manual fallback if QR scan is unused", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("4-Digit PIN Authentication", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = if (pinAuthEnabled) Color(0xFF00C853).copy(alpha = 0.15f) else Color.Gray.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (pinAuthEnabled) "PIN ACTIVE" else "PIN OFF (QR ONLY)",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (pinAuthEnabled) Color(0xFF00C853) else Color.Gray,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (pinAuthEnabled) {
+                                        "Enabled: Devices can connect using PIN $pin. Tap switch to turn OFF."
+                                    } else {
+                                        "Disabled: 4-digit PIN is blocked. Secure QR pairing only."
+                                    },
+                                    fontSize = 11.sp,
+                                    color = if (pinAuthEnabled) Color(0xFF00C853) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                            IconButton(onClick = { viewModel.regeneratePin() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Regenerate PIN")
+                            Switch(
+                                checked = pinAuthEnabled,
+                                onCheckedChange = { viewModel.setPinAuthEnabled(it) }
+                            )
+                        }
+
+                        // Collapsible PIN code panel visible only when PIN is enabled
+                        if (pinAuthEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("Current 4-Digit PIN", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        text = pin,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 18.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { copyToClipboard(context, pin, "PIN copied to clipboard!") }) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy PIN")
+                                    }
+                                    IconButton(onClick = { viewModel.regeneratePin() }) {
+                                        Icon(Icons.Default.Refresh, contentDescription = "Regenerate PIN")
+                                    }
+                                }
                             }
                         }
                     }

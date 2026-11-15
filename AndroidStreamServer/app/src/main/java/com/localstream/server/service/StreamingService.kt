@@ -27,6 +27,7 @@ class StreamingService : Service() {
         const val ACTION_RESTART = "ACTION_RESTART"
         const val EXTRA_PORT = "EXTRA_PORT"
         const val EXTRA_PIN = "EXTRA_PIN"
+        const val EXTRA_PIN_AUTH_ENABLED = "EXTRA_PIN_AUTH_ENABLED"
         const val EXTRA_USE_HTTPS = "EXTRA_USE_HTTPS"
         const val EXTRA_RATE_LIMIT = "EXTRA_RATE_LIMIT"
         const val EXTRA_MAX_FAILED = "EXTRA_MAX_FAILED"
@@ -36,6 +37,9 @@ class StreamingService : Service() {
 
         private val _isHttps = MutableStateFlow(true)
         val isHttps: StateFlow<Boolean> = _isHttps.asStateFlow()
+
+        private val _pinAuthEnabled = MutableStateFlow(false)
+        val pinAuthEnabled: StateFlow<Boolean> = _pinAuthEnabled.asStateFlow()
 
         private val _activePin = MutableStateFlow("8492")
         val activePin: StateFlow<String> = _activePin.asStateFlow()
@@ -62,6 +66,11 @@ class StreamingService : Service() {
         fun updatePin(pin: String) {
             _activePin.value = pin
             currentServerInstance?.pin = pin
+        }
+
+        fun updatePinAuthEnabled(enabled: Boolean) {
+            _pinAuthEnabled.value = enabled
+            currentServerInstance?.pinAuthEnabled = enabled
         }
 
         fun authorizeDevice(token: String, clientName: String): DeviceSession? {
@@ -115,39 +124,42 @@ class StreamingService : Service() {
             ACTION_START -> {
                 val port = intent.getIntExtra(EXTRA_PORT, 8443)
                 val pin = intent.getStringExtra(EXTRA_PIN) ?: _activePin.value
+                val pinAuthEnabled = intent.getBooleanExtra(EXTRA_PIN_AUTH_ENABLED, _pinAuthEnabled.value)
                 val useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, true)
                 val rateLimit = intent.getIntExtra(EXTRA_RATE_LIMIT, 30)
                 val maxFailed = intent.getIntExtra(EXTRA_MAX_FAILED, 5)
-                startServer(port, pin, useHttps, rateLimit, maxFailed)
+                startServer(port, pin, pinAuthEnabled, useHttps, rateLimit, maxFailed)
             }
             ACTION_RESTART -> {
                 val port = intent.getIntExtra(EXTRA_PORT, if (_isHttps.value) 8443 else 8080)
                 val pin = intent.getStringExtra(EXTRA_PIN) ?: _activePin.value
+                val pinAuthEnabled = intent.getBooleanExtra(EXTRA_PIN_AUTH_ENABLED, _pinAuthEnabled.value)
                 val useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, true)
                 val rateLimit = intent.getIntExtra(EXTRA_RATE_LIMIT, 30)
                 val maxFailed = intent.getIntExtra(EXTRA_MAX_FAILED, 5)
-                restartServer(port, pin, useHttps, rateLimit, maxFailed)
+                restartServer(port, pin, pinAuthEnabled, useHttps, rateLimit, maxFailed)
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun restartServer(port: Int, pin: String, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {
+    private fun restartServer(port: Int, pin: String, pinAuthEnabled: Boolean, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {
         val existingSessions = currentServerInstance?.authorizedSessions?.values?.toList() ?: emptyList()
         server?.stop()
         server = null
         currentServerInstance = null
         _isRunning.value = false
-        startServer(port, pin, useHttps, rateLimit, maxFailed)
+        startServer(port, pin, pinAuthEnabled, useHttps, rateLimit, maxFailed)
         for (session in existingSessions) {
             server?.authorizeDevice(session.token, session.clientName)
         }
     }
 
-    private fun startServer(port: Int, pin: String, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {
+    private fun startServer(port: Int, pin: String, pinAuthEnabled: Boolean, useHttps: Boolean, rateLimit: Int, maxFailed: Int) {
         if (_isRunning.value) return
 
         _activePin.value = pin
+        _pinAuthEnabled.value = pinAuthEnabled
         _isHttps.value = useHttps
         val ip = NetworkUtils.getPrimaryIpAddress()
         val scheme = if (useHttps) "https" else "http"
@@ -158,6 +170,7 @@ class StreamingService : Service() {
             context = applicationContext,
             port = port,
             pin = pin,
+            pinAuthEnabled = pinAuthEnabled,
             useHttps = useHttps,
             maxRequestsPerSecond = rateLimit,
             maxFailedAttempts = maxFailed
@@ -207,9 +220,10 @@ class StreamingService : Service() {
         )
 
         val protocol = if (_isHttps.value) "HTTPS (Encrypted)" else "HTTP"
+        val pinText = if (_pinAuthEnabled.value) "PIN: $pin" else "PIN: Disabled (QR Only)"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Local Stream Server ($protocol)")
-            .setContentText("URL: $url | PIN: $pin")
+            .setContentText("URL: $url | $pinText")
             .setSmallIcon(android.R.drawable.ic_menu_upload)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
