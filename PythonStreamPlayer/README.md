@@ -69,16 +69,22 @@ A modern, high-performance local video streaming player built with Python and **
 
 ## 🚀 Running the Player
 
-### Prerequisites
+### Option 1: Standalone Portable Executable (Recommended - Zero Installation)
+1. Download `LocalStreamPlayer.exe` from [GitHub Releases](https://github.com/pravinkumar2k02/LocalStream/releases).
+2. Double-click `LocalStreamPlayer.exe` to run.
+   - No Python, FFmpeg, or dependencies needed. Works on any Windows 10/11 machine.
+
+### Option 2: Run from Python Source
+#### Prerequisites
 - Python 3.10+ (Tested with Python 3.14)
 - Pip
 
-### Install Dependencies
+#### Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### Launch
+#### Launch
 ```bash
 python main.py
 ```

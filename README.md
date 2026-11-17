@@ -46,9 +46,10 @@ An end-to-end, high-security local media streaming solution consisting of:
 
 ```
 LocalStream/
+├── LocalStreamPlayer.exe            # Standalone Portable Windows Executable (Zero Installation)
 ├── LocalStreamServer.apk            # Pre-compiled Android APK with TLS 1.3 & QR Scanner
-├── run-desktop-player.bat           # 1-Click launcher for Python Desktop Player
-├── run-desktop-player.ps1           # PowerShell launcher for Python Desktop Player
+├── run-desktop-player.bat           # 1-Click launcher for Python Desktop Player (Source)
+├── run-desktop-player.ps1           # PowerShell launcher for Python Desktop Player (Source)
 ├── README.md                        # Documentation
 │
 ├── PythonStreamPlayer/              # High-Performance Python Client (PyQt6)
@@ -96,19 +97,31 @@ LocalStream/
 3. **Select Folder & Start Server**:
    - Open **Local Stream Server**.
    - Tap **"Pick Folder"** and choose any directory containing movies or audio.
-   - Adjust **Security & Rate Limiting** settings if desired (HTTPS toggle, req/s limit, max failed attempts).
+   - Adjust **Security & Rate Limiting** settings if desired (HTTPS toggle, PIN auth toggle, req/s limit).
    - Tap **"Start Server"**. The app displays the active server addresses (e.g. `https://192.168.43.1:8443` or `http://192.168.43.1:8080`).
 
 ---
 
-### Step 2: Run and Pair the Laptop Player (Python)
+### Step 2: Run and Pair the Windows Player
+You can run the player on any Windows laptop/PC using either method:
+
+#### Option A: Portable Executable (No Python or installation required!)
+1. Download **`LocalStreamPlayer.exe`** from the [GitHub Releases](https://github.com/pravinkumar2k02/LocalStream/releases).
+2. Simply double-click **`LocalStreamPlayer.exe`**.
+   - Completely standalone and portable — run it from your Desktop, USB drive, or Downloads folder on any Windows machine!
+
+#### Option B: Run from Source
 1. Double-click `run-desktop-player.bat` (or run `run-desktop-player.ps1`).
-2. Click **"📱 Pair (QR)"** in the top bar of the laptop player.
-3. On your phone, tap **"📷 Scan Laptop QR"** and point the camera at the QR code on the laptop screen.
+
+---
+
+### Step 3: Pairing & Streaming
+1. Click **"📱 Pair (QR)"** in the top bar of the laptop player.
+2. On your phone, tap **"📷 Scan Laptop QR"** and point the camera at the QR code on the laptop screen.
    - The phone immediately displays: `Authorized: <Your-Laptop-Name>`.
    - The existing connection remains active even if other devices are already connected.
-4. On the laptop, click **"✅ Use This Token & Connect"** (or click **"⚡ Connect"**).
-5. Browse or filter the file list, and click **▶ Play** (or double-click any row).
+3. On the laptop, click **"✅ Use This Token & Connect"** (or click **"⚡ Connect"**).
+4. Browse or filter the file list, and click **▶ Play** (or double-click any row).
 
 ---
 

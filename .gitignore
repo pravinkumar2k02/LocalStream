@@ -10,11 +10,11 @@ dist/
 # Local configuration
 local.properties
 
-# Android specific
-.cxx/
-capture/
+# Binaries
 *.apk
 !LocalStreamServer.apk
+*.exe
+*.zip
 
 # IDE configuration
 .idea/
